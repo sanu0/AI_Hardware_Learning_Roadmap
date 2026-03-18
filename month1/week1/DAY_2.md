@@ -250,6 +250,168 @@ Warp Schedulers      Pick warps, issue instructions   Keeping all units busy,
 (4 per SM)           manage thread execution           hiding memory latency
 ```
 
+## 1.4 How Software (Threads/Warps/Blocks) Maps to Hardware (Cores/SMs)
+
+This is where it all clicks. Day 1 taught you the SOFTWARE view (threads, warps, blocks).
+Today you learned the HARDWARE view (cores, Tensor Cores, SFUs). Here's how they connect:
+
+```
+SOFTWARE VIEW:                    HARDWARE VIEW:
+(what you program)                (what physically exists)
+
+Thread                    →       Gets executed on a CUDA Core / Tensor Core
+Warp (32 threads)         →       The unit a Scheduler picks and sends to execution units
+Block (up to 1024 threads)→       Lives on ONE SM, uses that SM's shared memory
+Grid (many blocks)        →       Spread across ALL SMs on the GPU
+```
+
+### How Many Threads, Warps, and Blocks Fit on One SM?
+
+These are NOT fixed — they depend on YOUR kernel's resource usage:
+
+```
+HARD LIMITS per SM (H100):
+  Max threads:           2,048
+  Max warps:             64  (= 2048 / 32)
+  Max blocks:            32
+  Max shared memory:     228 KB
+  Total registers:       65,536
+
+EXAMPLE 1: Block of 256 threads
+  Warps per block:     256 / 32 = 8 warps
+  Blocks that fit:     2048 / 256 = 8 blocks  (if resources allow)
+  Total warps on SM:   8 blocks × 8 warps = 64 warps ✓
+  Total threads on SM: 2,048 ✓ (100% occupancy)
+
+EXAMPLE 2: Block of 1024 threads
+  Warps per block:     1024 / 32 = 32 warps
+  Blocks that fit:     2048 / 1024 = 2 blocks
+  Total warps on SM:   2 blocks × 32 warps = 64 warps ✓
+  Total threads on SM: 2,048 ✓ (100% occupancy)
+
+EXAMPLE 3: Block of 512 threads, each using 64 registers
+  Warps per block:     512 / 32 = 16 warps
+  Registers per block: 512 threads × 64 registers = 32,768
+  Blocks that fit:     65,536 / 32,768 = 2 blocks (register-limited!)
+  Total threads on SM: 2 × 512 = 1,024 (50% occupancy)
+```
+
+### But Wait — 2,048 Threads but Only 128 Cores?!
+
+This is the most common confusion. The answer: **they take turns!**
+
+```
+SM has:  2,048 threads living on it (64 warps)
+SM has:  128 FP32 cores + 4 Tensor Cores + 16 SFUs + 32 Load/Store
+
+In ONE clock cycle, the 4 warp schedulers each pick 1 warp:
+  → 4 warps × 32 threads = 128 threads EXECUTE this cycle
+  → The other 2,048 - 128 = 1,920 threads are WAITING
+
+The 1,920 waiting threads are either:
+  • Waiting for data from HBM (~400 cycles away)
+  • Waiting for their turn to use execution units
+  • Waiting for a __syncthreads() barrier
+
+CYCLE BY CYCLE:
+
+  Cycle 1:
+    Scheduler 0 → Warp 0  "ADD instruction"    → uses 32 FP32 cores
+    Scheduler 1 → Warp 8  "TENSOR MULTIPLY"    → uses 1 Tensor Core
+    Scheduler 2 → Warp 16 "LOAD from HBM"      → uses 32 Load/Store units
+    Scheduler 3 → Warp 24 "COMPUTE exp()"      → uses 16 SFUs
+    
+    128 threads active. 1,920 waiting.
+
+  Cycle 2:
+    Scheduler 0 → Warp 0 waiting for memory... skip! → pick Warp 1
+    Scheduler 1 → Warp 9
+    Scheduler 2 → Warp 17
+    Scheduler 3 → Warp 25
+    
+    128 DIFFERENT threads active now.
+
+  Cycle 3:
+    Schedulers pick 4 more ready warps... and so on.
+
+After ~500 cycles: every warp has had many turns.
+The SM is never idle because there's ALWAYS a ready warp to run.
+THIS is latency hiding through massive parallelism.
+```
+
+### Each Execution Unit Explained with What It Does Per Cycle
+
+```
+COMPONENT        COUNT   THREADS/CYCLE  WHAT IT DOES              LLM EXAMPLE
+─────────────────────────────────────────────────────────────────────────────────
+Warp Scheduler    4      Picks 4 warps  "Traffic controller"      Keeps GPU busy
+                                        Selects ready warps        by switching warps
+
+FP32 Cores       128     4×32=128       Regular math:              Residual connection:
+                         threads         add, multiply, compare     output += input
+                                                                    Bias addition
+
+INT32 Cores       64     2×32=64        Integer math:              Calculating memory
+                         threads*        address calculation        addresses when loading
+                                        * runs IN PARALLEL          weight matrices
+                                          with FP32 (free!)
+
+FP64 Cores         2     <32 threads    Double precision math      NOT used in LLMs
+                                        (scientific computing)      (ignore for AI)
+
+Tensor Cores       4     4×32=128       Matrix multiply:           Q = input × W_Q
+                         threads**       D[16×16] = A×B + C         attention scores
+                                        4,096 FLOPs per cycle!      FFN layers
+                                        ** 32 threads cooperate     90% of LLM compute
+                                           to feed 1 Tensor Core
+
+SFU               16     32 threads     Transcendental math:       softmax → exp(x)
+                         in 2 cycles     sin, cos, exp, sqrt, 1/x  RoPE → sin/cos
+                                                                    GELU → exp(x)
+
+Load/Store        32     1×32=32        Read/write memory:         Loading weight matrix
+                         threads         HBM, shared memory,        tiles from HBM
+                                        L1/L2 cache                 Storing output back
+```
+
+### The Restaurant Kitchen Analogy
+
+```
+AN SM IS A RESTAURANT KITCHEN:
+
+Head Chefs (4 Warp Schedulers):
+  Look at all pending orders (warps), pick 4 that are ready,
+  send each to the right station.
+
+Grill Station (128 FP32 Cores):
+  Handles basic cooking (add, multiply).
+  Can cook 128 items per minute (cycle).
+
+Specialty Oven (4 Tensor Cores):
+  Handles complex dishes (matrix multiply).
+  Each oven cooks an ENTIRE 16-course meal in one minute!
+  This is where 90% of the restaurant's output comes from.
+
+Prep Counter (64 INT32 Cores):
+  Chops ingredients and measures portions (address calculation).
+  Works SIMULTANEOUSLY with the grill — free labor!
+
+Pastry Station (16 SFUs):
+  Handles desserts (sin, cos, exp) — special recipes.
+  Serves half a table (16 of 32) per minute.
+
+Delivery Window (32 Load/Store):
+  Sends finished plates out (store) and brings ingredients in (load).
+  Can handle one full table (32 items) per minute.
+
+THE ORDERS (2,048 threads / 64 warps):
+  The kitchen has 64 orders "in progress" at once.
+  Only 4 orders are being ACTIVELY cooked at any moment.
+  The rest are waiting for ingredients from the warehouse (HBM).
+  Head chefs constantly rotate which orders get worked on.
+  Nobody stands idle — there's always an order ready.
+```
+
 ---
 
 # PART 2: WARP SCHEDULERS — The Brain of the SM
