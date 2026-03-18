@@ -938,7 +938,7 @@ else:
     
     # Memory
     print(f"\n--- Memory ---")
-    total_mem = props.total_global_mem / (1024**3)
+    total_mem = props.total_memory / (1024**3)
     print(f"Total GPU Memory: {total_mem:.1f} GB")
     print(f"Memory Bus Width: {props.memory_bus_width} bits")  # Not available in torch
     
