@@ -559,13 +559,17 @@ REGULAR FP32 CUDA CORE (one per cycle):
   Time: 4,096 cycles (one at a time)
 
 TENSOR CORE (one per cycle):
-  Computes: D[16×16] = A[16×8] × B[8×16] + C[16×16]
-  That's: 16 × 16 × 8 = 2,048 multiply-adds = 4,096 FLOPs
-  Time: 1 cycle
+  Computes: D[16×8] = A[16×16] × B[16×8] + C[16×8]
+  (base MMA instruction is m16n8k16)
+  That's: 16 × 8 × 16 = 2,048 multiply-adds = 4,096 FLOPs
+  Time: 1 cycle per Tensor Core
 
-  SPEEDUP: 4,096 / 1 = 4,096x for this operation!
+  One SM has 128 FP32 cores doing 256 FLOPs/cycle total
+  One SM has 4 Tensor Cores doing ~16,384 FLOPs/cycle total
+  Tensor Cores per SM: ~64x more FLOPs than CUDA cores!
   
-  (In practice, ~8-16x overall speedup because of data movement overhead)
+  Overall GPU speedup (FP16 TC vs FP32): ~15x (990 vs 67 TFLOPS)
+  This matches the official specs.
 ```
 
 ## 3.2 How Tensor Cores Work Physically
@@ -574,14 +578,15 @@ A Tensor Core is a specialized circuit that does a small matrix multiply-and-acc
 (MMA) in a single clock cycle. Here's what happens:
 
 ```
-TENSOR CORE OPERATION (4th gen, Hopper):
+TENSOR CORE BASE MMA OPERATION (4th gen, Hopper):
 
-Input A: 16×8 matrix (128 elements, in FP16/BF16/FP8)
-Input B: 8×16 matrix (128 elements, in FP16/BF16/FP8)
-Input C: 16×16 matrix (256 elements, accumulator in FP32)
+The base instruction is called m16n8k16:
+Input A: 16×16 matrix (256 elements, in FP16/BF16/FP8)
+Input B: 16×8 matrix (128 elements, in FP16/BF16/FP8)
+Input C: 16×8 matrix (128 elements, accumulator in FP32)
 
 Operation:
-  D = A × B + C
+  D[16×8] = A[16×16] × B[16×8] + C[16×8]
 
   The Tensor Core has a grid of multiply-add circuits:
   
@@ -589,16 +594,20 @@ Operation:
   │  A[0,0]×B[0,0] + A[0,1]×B[1,0] + ...      │ → D[0,0]
   │  A[0,0]×B[0,1] + A[0,1]×B[1,1] + ...      │ → D[0,1]
   │  ...                                        │
-  │  A[15,0]×B[0,15] + A[15,1]×B[1,15] + ...  │ → D[15,15]
+  │  A[15,0]×B[0,7] + A[15,1]×B[1,7] + ...    │ → D[15,7]
   │                                              │
   │  ALL 2,048 multiply-adds happen              │
   │  SIMULTANEOUSLY in hardware.                 │
   │  Not sequentially — in PARALLEL circuits.    │
   └────────────────────────────────────────────┘
 
-Output D: 16×16 matrix (256 elements, in FP32)
+Output D: 16×8 matrix (128 elements, in FP32)
 
-Total: 2,048 multiply-adds = 4,096 FLOPs in 1 cycle.
+Total: 2,048 multiply-adds = 4,096 FLOPs per base instruction.
+
+NOTE: To compute a full 16×16 output, you issue TWO m16n8k16 instructions.
+Hopper also has WGMMA (warpgroup MMA) that operates across 4 warps (128 threads)
+for even larger tiles. Libraries like cuBLAS handle this automatically.
 ```
 
 ## 3.3 Tensor Core Supported Precisions (and what each means for LLMs)

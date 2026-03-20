@@ -212,9 +212,10 @@ Much faster than regular RAM. "HBM" is like having the pantry RIGHT NEXT
 to the kitchen instead of down the hall.
 
 **Tensor Core:** Specialized hardware inside NVIDIA GPUs that can do a small
-matrix multiply (16×16) in a single clock cycle. Regular cores do one
-multiply per cycle. So Tensor Cores are ~256x more efficient for matrix math.
-They only work with reduced precision (FP16, BF16, FP8) — not FP32.
+matrix multiply-accumulate (e.g., 16×8×16 tile) in a single clock cycle.
+Regular cores do one multiply per cycle. Tensor Cores do thousands of
+multiply-adds per cycle, making them ~10-16x faster for matrix math overall.
+They only work with reduced precision (FP16, BF16, FP8, INT8) — not full FP32.
 
 **SM (Streaming Multiprocessor):** A self-contained processing unit inside the GPU.
 Each SM has its own CUDA cores, Tensor Cores, shared memory, and registers.
@@ -883,10 +884,11 @@ Tensor Core (one cycle):
     (Actually on H100 4th gen: 16×16 matrix at FP16)
 ```
 
-On H100, each Tensor Core processes 16×16 matrices:
-- 16 × 16 × 16 = 4,096 multiply-adds = 8,192 FLOPs per Tensor Core per cycle
+On H100, each Tensor Core's base instruction operates on m16n8k16 tiles:
+- The base MMA: A[16×16] × B[16×16] → C[16×16] (built from smaller instructions)
 - 4 Tensor Cores per SM × 132 SMs = 528 Tensor Cores
-- At 1.83 GHz: 528 × 8,192 × 1.83 GHz = ~7.9 PFLOPS (FP16)
+- Official peak: **989 TFLOPS at FP16** (from NVIDIA spec sheet)
+- With sparsity: ~1,979 TFLOPS FP16, and FP8: ~1,979 TFLOPS dense
 
 **This is WHY LLMs use FP16/BF16 for training and FP8 for inference:**
 Tensor Cores only work with reduced precision. If you use FP32, you fall back
@@ -938,7 +940,7 @@ Step 2: PyTorch converts "Hello" to token IDs [15496]
         (this happens on CPU)
         ↓
 Step 3: Token IDs are copied from CPU RAM to GPU HBM
-        (cudaMemcpy over PCIe: ~12 GB/s for PCIe 4.0)
+        (cudaMemcpy over PCIe: ~25-32 GB/s for PCIe 4.0 x16)
         ↓
 Step 4: Embedding lookup on GPU
         - Thread reads token ID 15496 from HBM
