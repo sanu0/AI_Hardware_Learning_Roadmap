@@ -543,6 +543,222 @@ took ~800 cycles. This is why memory bandwidth is the bottleneck. The GPU's
 strategy is to have SO many warps that there's always something to compute
 while other warps wait.
 
+## 2.4 Full Multi-Warp Working Example: Matrix Multiply on an SM
+
+Let's trace a REAL scenario: 4+ warps computing elements of a matrix multiply
+`C[i][j] = sum(A[i][k] * B[k][j])`, showing cycle by cycle how the SM stays busy.
+
+### Setup
+```
+SM has 4 warp schedulers and these warps loaded:
+
+Warp 0: Computing C[0][0] — needs A[0][k] and B[k][0] values
+Warp 1: Computing C[0][1] — needs A[0][k] and B[k][1] values
+Warp 2: Computing C[1][0] — needs A[1][k] and B[k][0] values
+Warp 3: Computing C[1][1] — needs A[1][k] and B[k][1] values
+Warp 4-63: More output elements, waiting in queue
+```
+
+### Phase 1: Everybody Loads (Cycles 1-50)
+```
+CYCLE 1:
+  Scheduler 0 → Warp 0: LOAD A[0][0] from HBM → request sent
+                         Warp 0 state: WAITING (data arrives in ~400 cycles)
+  Scheduler 1 → Warp 1: LOAD A[0][0] from HBM → same address as Warp 0
+                         Warp 1 state: WAITING
+  Scheduler 2 → Warp 2: LOAD A[1][0] from HBM → different row
+                         Warp 2 state: WAITING
+  Scheduler 3 → Warp 3: LOAD A[1][0] from HBM
+                         Warp 3 state: WAITING
+
+  All 4 warps issued loads. All waiting. SM would be idle...
+  BUT there are more warps!
+
+CYCLE 2:
+  Scheduler 0 → Warp 0 still waiting (399 cycles left)... SKIP
+               → Pick Warp 4: LOAD A[2][0] from HBM
+  Scheduler 1 → Warp 1 still waiting... SKIP
+               → Pick Warp 5: LOAD A[2][0]
+  Scheduler 2 → Warp 2 still waiting... SKIP
+               → Pick Warp 6: LOAD A[3][0]
+  Scheduler 3 → Warp 3 still waiting... SKIP
+               → Pick Warp 7: LOAD A[3][0]
+
+  Warps 0-3 waiting. Warps 4-7 just issued loads. SM still busy!
+
+CYCLES 3-50:
+  Same pattern: schedulers keep picking fresh warps (8,9,10,11...)
+  Each new warp issues its first LOAD instruction.
+  By cycle 50: ~50 warps all waiting for memory.
+  The SM issued a LOAD instruction every cycle — never idle.
+```
+
+### Phase 2: First Data Arrives (Cycle ~400)
+```
+CYCLE 400: ★ Warp 0's A[0][0] data arrives from HBM! ★
+
+  Warp 0 register state:
+    reg0 = A[0][0] = 0.53   ← just arrived!
+    reg1 = (empty)           ← still needs B[0][0]
+    reg2 = 0.0               ← accumulator (partial sum)
+
+  Scheduler 0 → Warp 0 is READY! Issue: LOAD B[0][0] from HBM
+                Warp 0 state: WAITING again (needs B value too)
+
+  Scheduler 1 → Warp 1 also ready (A[0][0] was in same cache line)
+                Issue: LOAD B[0][1]
+
+  Scheduler 2 → Warp 44 (still issuing first loads for new warps)
+  Scheduler 3 → Warp 45
+```
+
+### Phase 3: Both Values Ready — COMPUTE! (Cycle ~800)
+```
+CYCLE 800: ★ Warp 0 has BOTH values in registers! ★
+
+  Warp 0 register state:
+    reg0 = A[0][0] = 0.53    ← arrived at cycle ~400
+    reg1 = B[0][0] = -0.21   ← arrived at cycle ~800
+    reg2 = 0.0                ← accumulator
+
+  Scheduler 0 → Warp 0: FMA (Fused Multiply-Add)
+                reg2 = reg0 × reg1 + reg2
+                reg2 = 0.53 × (-0.21) + 0.0
+                reg2 = -0.1113
+
+                → Executed on FP32 CUDA Core
+                → Takes exactly 1 CYCLE
+                → Warp 0 state: READY (result in register)
+
+  Scheduler 1 → Warp 1: FMA (its own A and B values)
+                reg2 = A[0][0] × B[0][1] + 0.0
+
+  Scheduler 2 → Warp 2: FMA
+  Scheduler 3 → Warp 3: FMA
+
+  ALL 4 WARPS COMPUTED IN THIS CYCLE!
+  But it took ~800 cycles to get here.
+  Compute: 1 cycle. Memory: ~800 cycles. Ratio: 0.1% compute, 99.9% waiting.
+```
+
+### Phase 4: Next Iteration (Cycle ~801+)
+```
+CYCLE 801:
+  Warp 0 needs the NEXT pair for the dot product:
+  C[0][0] = A[0][0]×B[0][0] + A[0][1]×B[1][0] + A[0][2]×B[2][0] + ...
+            ↑ done!            ↑ need this next
+
+  Scheduler 0 → Warp 0: LOAD A[0][1] from HBM
+                Warp 0 state: WAITING again...
+
+  Meanwhile:
+  Scheduler 1 → Warp 1: LOAD A[0][1] (needs same A value, different B)
+  Scheduler 2 → Warp 4: its data arrived → FMA (first multiply-add)
+  Scheduler 3 → Warp 5: its data arrived → FMA
+
+  THE SM IS A PIPELINE:
+    Warps 0-3:   starting their 2nd load-load-compute cycle
+    Warps 4-7:   doing their 1st compute (data just arrived)
+    Warps 8-50:  still waiting for 1st data from HBM
+    Warps 50+:   haven't even started yet
+
+  Everyone is at a DIFFERENT stage, and the SM always has
+  someone ready to compute. This is the pipeline in action.
+```
+
+### The Pipeline Steady State (Cycle ~1000+)
+```
+At any given cycle, the SM looks like this:
+
+WARP    STATE                              STAGE
+─────────────────────────────────────────────────────────
+0       ████ COMPUTING (3rd multiply-add)  reg2 = -0.1113 + 0.089 + ...
+1       ████ COMPUTING (3rd multiply-add)
+2       ░░░░ WAITING (loading A[1][3])     3rd pair, waiting for A
+3       ████ COMPUTING (2nd multiply-add)
+4       ░░░░ WAITING (loading B[2][1])     2nd pair, waiting for B
+5       ████ COMPUTING (1st multiply-add)  just got both A and B
+6       ░░░░ WAITING for memory
+7       ░░░░ WAITING for memory
+8       ████ COMPUTING (2nd multiply-add)
+9       ░░░░ WAITING for memory
+10      ████ COMPUTING (1st multiply-add)
+...
+60      ░░░░ WAITING (first load still in flight)
+61      ░░░░ WAITING
+62      ░░░░ WAITING
+63      ░░░░ WAITING (just issued first load)
+
+████ = READY, scheduler can pick this warp (~12 warps ready)
+░░░░ = WAITING for memory, scheduler skips (~52 warps waiting)
+
+4 schedulers pick 4 of the ~12 ready warps this cycle.
+Next cycle: some warps finish computing (become waiting for next load),
+            some data arrives (warps become ready).
+The mix constantly changes but there are ALWAYS ready warps.
+
+THIS IS WHY THE SM IS NEVER IDLE.
+```
+
+### Now The Same Thing With Tensor Cores (Real LLM)
+
+In actual LLMs, the multiply-adds use Tensor Cores on tiles, not individual elements:
+
+```
+Instead of: one thread computing C[0][0] one multiply at a time
+Reality:    32 threads cooperate to feed a 16×8 tile to a Tensor Core
+
+CYCLE 1200 — LLM MATRIX MULTIPLY (Q = input × W_Q):
+
+cuBLAS has divided the output matrix into 16×8 tiles.
+Each warp computes one output tile.
+
+Warp 0:  ✓ Has loaded A tile [16×16] and B tile [16×8] into shared memory
+         All 32 threads hold parts of the tiles in their registers:
+           Thread 0-7:   rows 0-1 of A tile
+           Thread 8-15:  rows 2-3 of A tile
+           Thread 16-23: rows 4-5 of A tile
+           Thread 24-31: rows 6-7 of A tile
+
+         Scheduler 0 → issues MMA instruction to Warp 0:
+           Tensor Core computes: D[16×8] = A[16×16] × B[16×8] + C[16×8]
+           = 2,048 multiply-adds = 4,096 FLOPs
+           IN ONE CYCLE!
+
+Warp 1:  ░ Still loading tiles from HBM → shared memory (waiting)
+Warp 2:  ✓ Tiles ready → Scheduler 1 issues MMA to Warp 2
+Warp 3:  ░ Waiting for memory
+Warp 4:  ✓ Tiles ready → Scheduler 2 issues MMA to Warp 4
+Warp 5:  ✓ Tiles ready → Scheduler 3 issues MMA to Warp 5
+
+ALL 4 TENSOR CORES ACTIVE THIS CYCLE:
+  4 Tensor Cores × 4,096 FLOPs = 16,384 FLOPs in one cycle
+  vs FP32 CUDA cores: 128 cores × 2 FLOPs = 256 FLOPs
+  Tensor Cores deliver 64x more FLOPs per cycle on this SM!
+```
+
+### The Laundromat Analogy (Memory It Easily)
+```
+An SM is a LAUNDROMAT with 4 washing machines (schedulers):
+
+64 customers (warps) waiting with laundry (data to process).
+
+Each customer's task:
+  1. Bring clothes from car (LOAD from HBM) ——→ 40 minutes (slow!)
+  2. Add detergent (COMPUTE multiply-add) ————→ 1 second (instant!)
+  3. Bring more clothes from car (LOAD more) —→ 40 minutes (slow!)
+  4. Add fabric softener (COMPUTE again) ————→ 1 second (instant!)
+  5. Take clothes back to car (STORE to HBM) —→ 40 minutes (slow!)
+
+With just 1 customer: 120 minutes total (99.99% walking to/from car)
+With 64 customers and 4 machines: machines ALWAYS running
+  While Customer 0 walks to car, Customers 1-3 use the machines.
+  When Customer 0 returns, a machine is free immediately.
+  No machine ever sits idle. MAXIMUM throughput.
+
+This is latency hiding. This is why GPUs need thousands of threads.
+```
+
 ---
 
 # PART 3: TENSOR CORES — The AI Accelerator In Detail
