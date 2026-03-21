@@ -1681,7 +1681,7 @@ After this Day 1 study:
 - [x] You know the GPU memory hierarchy and why it matters
 - [ ] You can trace what happens in hardware when an LLM generates a token *(will click fully in Week 5)*
 
-**Completed: March 13, 2026 (Pune → Kolkata flight)**
+**Completed: March 13, 2026**
 
 **Day 2** will go DEEPER into the SM: exactly how Tensor Cores work,
 what happens during a warp schedule cycle, register allocation, and
