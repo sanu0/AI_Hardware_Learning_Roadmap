@@ -335,6 +335,282 @@
 
 ---
 
+# ═══════════════════════════════════════════════════════════
+# MONTH-BY-MONTH FOCUS & CAPABILITIES
+# "After this month, I can..."
+# ═══════════════════════════════════════════════════════════
+
+---
+
+### Month 1 — GPU Architecture + CUDA Fundamentals + Neural Network Basics
+**Focus:** CPU vs GPU architecture, CUDA programming model (kernels, threads, warps, blocks, grids), GPU memory hierarchy (global, shared, constant), memory coalescing, warp execution & divergence, parallel reduction, CUDA streams & graphs, neural networks from scratch, attention mechanism, tokenization (BPE)
+**Project:** GPU Matrix Math Engine
+
+**After this month, you can:**
+- [ ] Write and launch CUDA kernels — vector ops, reductions, tiled matrix multiplication
+- [ ] Explain GPU architecture from memory: SMs, warps, shared memory, L1/L2, HBM
+- [ ] Optimize memory access: coalescing, shared memory tiling, bank conflict avoidance
+- [ ] Use CUDA streams for overlapping computation and data transfer
+- [ ] Build an MLP from scratch in NumPy (forward + backward pass, no framework)
+- [ ] Implement the attention mechanism and BPE tokenizer from scratch
+- [ ] Benchmark CPU vs GPU and explain roofline model analysis
+- [ ] Profile basic CUDA programs and identify compute-bound vs memory-bound kernels
+
+---
+
+### Month 2 — Transformers + GPT from Scratch + GPU Libraries + Profiling
+**Focus:** Full Transformer architecture (encoder + decoder), multi-head attention, positional encodings (sinusoidal, RoPE), GPT-2 implementation, cuBLAS, cuDNN, Tensor Cores (WMMA), Nsight Systems & Compute profiling, LLaMA architecture (RMSNorm, SwiGLU, GQA), scaling laws, mixed precision training (AMP, BF16), efficient data loading, CNNs
+**Project:** nanoLLM — Your Own GPT from Scratch
+
+**After this month, you can:**
+- [ ] Implement a complete Transformer (encoder + decoder) from scratch — no `nn.MultiheadAttention`
+- [ ] Build and train GPT-2 (124M params) with KV-cache inference and all sampling strategies
+- [ ] Implement LLaMA-style model: RMSNorm, RoPE, SwiGLU, Grouped Query Attention
+- [ ] Use cuBLAS for high-performance GEMM and Tensor Cores via WMMA API
+- [ ] Profile GPU workloads: Nsight Systems (timeline) and Nsight Compute (kernel-level SOL analysis)
+- [ ] Train with mixed precision (FP16/BF16 AMP) and understand loss scaling
+- [ ] Use HuggingFace ecosystem: AutoModel, Trainer, tokenizers, datasets
+- [ ] Build efficient data pipelines: pinned memory, num_workers, prefetch, gradient accumulation
+
+---
+
+### Month 3 — Distributed Training + Fine-Tuning + Flash Attention + Triton
+**Focus:** NCCL collectives (AllReduce, AllGather), DDP, tensor/pipeline/data parallelism, ZeRO, pre-training pipeline, SFT, DPO, RLHF overview, custom CUDA extensions for PyTorch, Flash Attention (tiling + online softmax), Triton GPU programming, PTX/SASS analysis, tokenizer deep dive, multi-modal overview, GPU cluster architecture
+**Project:** LLM Surgery — Fine-Tuning & Alignment Toolkit
+
+**After this month, you can:**
+- [ ] Set up distributed training with DDP and convert any training loop to multi-GPU
+- [ ] Understand all parallelism strategies: data, tensor, pipeline, ZeRO stages
+- [ ] Build a complete pre-training pipeline: data curation → tokenization → training → evaluation
+- [ ] Fine-tune LLMs with SFT on instruction datasets (with loss masking on prompts)
+- [ ] Align models with DPO using preference data
+- [ ] Write custom CUDA kernels callable from PyTorch via `torch.utils.cpp_extension`
+- [ ] Write GPU kernels in Triton: fused softmax, fused LayerNorm, simplified Flash Attention
+- [ ] Explain Flash Attention's algorithm, online softmax trick, and IO complexity
+- [ ] Inspect PTX/SASS assembly and identify optimization opportunities
+- [ ] Build a chat interface with proper chat templates (ChatML, LLaMA format)
+
+---
+
+### Month 4 — Parameter-Efficient Fine-Tuning + Quantization
+**Focus:** LoRA from scratch, QLoRA (NF4 + double quantization), prefix tuning, adapters, IA³, adapter merging (TIES, DARE), quantization theory (INT4/INT8/FP8, symmetric/asymmetric, per-tensor/per-channel/per-group), GPTQ, AWQ, GGUF/llama.cpp, FP8 Transformer Engine, CUDA kernels for quantized inference
+**Project:** QuantBench — The Quantization Analyzer
+
+**After this month, you can:**
+- [ ] Implement LoRA from scratch and apply it to any model's attention layers
+- [ ] Fine-tune 7B+ parameter models with QLoRA on consumer GPUs (4-bit base + FP16 LoRA)
+- [ ] Merge, swap, and stack multiple LoRA adapters for different tasks
+- [ ] Quantize any HuggingFace model with GPTQ (4/8-bit), AWQ (4-bit), and GGUF (Q4_K_M through Q8_0)
+- [ ] Use FP8 training with Transformer Engine on Hopper GPUs
+- [ ] Write CUDA kernels for INT8 GEMM with dequantize-on-the-fly
+- [ ] Produce comprehensive quality-vs-speed-vs-memory reports for any quantization method
+- [ ] Build CLI tools that automate model compression workflows
+
+---
+
+### Month 5 — Inference Serving + Retrieval-Augmented Generation (RAG)
+**Focus:** Inference analysis (prefill vs decode, TTFT, TPOT, throughput), TensorRT-LLM, vLLM, PagedAttention, speculative decoding, continuous batching, Triton Inference Server, NVIDIA Dynamo, vector search (FAISS GPU, cuVS), embeddings, RAG architecture, chunking, hybrid retrieval, re-ranking, Graph RAG, agentic RAG, Self-RAG, RAGAS evaluation
+**Project:** DeepRAG — Production RAG with NVIDIA Stack
+
+**After this month, you can:**
+- [ ] Deploy LLMs for production on vLLM, TensorRT-LLM, and Triton Inference Server
+- [ ] Implement speculative decoding for 2-3x faster autoregressive generation
+- [ ] Build end-to-end RAG: document ingestion → chunking → embedding → retrieval → generation
+- [ ] Use GPU-accelerated vector search (FAISS GPU, cuVS/CAGRA)
+- [ ] Implement hybrid retrieval (dense + BM25) with cross-encoder re-ranking
+- [ ] Build agentic RAG (model decides when to retrieve) and Graph RAG (knowledge graph traversal)
+- [ ] Evaluate RAG quality with RAGAS: faithfulness, relevance, correctness
+- [ ] Serve models via REST API with benchmarked throughput and latency
+
+---
+
+### Month 6 — AI Agents + NVIDIA AI Ecosystem ⭐ (6-MONTH MILESTONE)
+**Focus:** Function calling, ReAct pattern, agent memory (short-term, long-term), planning (Tree of Thought, plan-and-execute), LangChain, LlamaIndex, multi-agent systems (CrewAI, AutoGen), NVIDIA AgentIQ, code-executing agents, agent safety, NVIDIA NIM, NeMo Framework, NeMo Guardrails, RAPIDS, DALI, Riva (ASR+TTS), ACE, AI Blueprints, Dynamo, NGC, build.nvidia.com
+**Project:** AgentForge — Multi-Agent AI Platform
+
+**After this month, you can:**
+- [ ] Build AI agents that reason, use tools, and maintain short-term + long-term memory
+- [ ] Orchestrate multi-agent systems with supervisor patterns and peer collaboration
+- [ ] Deploy any LLM with NVIDIA NIM in a single `docker run` command
+- [ ] Add safety guardrails using NeMo Guardrails with Colang
+- [ ] Use RAPIDS (cuDF, cuML, cuGraph) for GPU-accelerated data processing
+- [ ] Build voice-enabled AI with Riva ASR + TTS
+- [ ] Deploy reference architectures using NVIDIA AI Blueprints
+- [ ] Navigate the full NVIDIA AI ecosystem: NGC, NIM, NeMo, Triton, Dynamo, Riva, ACE
+- [ ] **You now have 14+ portfolio projects and can build real AI applications end-to-end**
+
+---
+
+### Month 7 — Multi-Modal AI + Knowledge Distillation + Diffusion Overview
+**Focus:** CLIP (contrastive image-text), Vision Transformers (ViT), LLaVA (visual instruction tuning), document understanding, video understanding, audio (Whisper, Riva), DALI for image loading, teacher-student distillation, feature distillation, model merging (SLERP, TIES, DARE), model soups, synthetic data generation basics, diffusion models overview (DDPM, latent diffusion, Stable Diffusion), DiT
+**Project:** VisionChat — Multi-Modal AI Assistant
+
+**After this month, you can:**
+- [ ] Build AI that understands images, documents, audio, and video in a single conversation
+- [ ] Fine-tune CLIP on custom datasets and build vision-language models (CLIP + projection + LLM)
+- [ ] Extract information from PDFs with tables, charts, and images
+- [ ] Distill large models into smaller ones (teacher-student, feature distillation)
+- [ ] Merge fine-tuned models using SLERP, TIES, DARE
+- [ ] Generate synthetic training data with Self-Instruct and Evol-Instruct
+- [ ] Understand how diffusion models work (forward/reverse process, latent space, guidance)
+- [ ] Build multi-modal chatbots with automatic modality routing
+
+---
+
+### Month 8 — Mixture of Experts + Advanced Architectures
+**Focus:** MoE Transformer implementation, expert parallelism, load balancing loss, router architectures (hash, learned, expert-choice), DeepSeek-V3 architecture (Multi-head Latent Attention, DeepSeekMoE), sparse vs dense MoE, auxiliary losses, expert communication patterns
+**Project:** MoE-Lab — Mixture of Experts Playground
+
+**After this month, you can:**
+- [ ] Implement MoE Transformers with top-k routing and load balancing
+- [ ] Visualize which experts specialize in which types of input (code, math, language)
+- [ ] Implement Multi-head Latent Attention (MLA) from DeepSeek-V3
+- [ ] Prune experts and measure quality impact
+- [ ] Compare MoE vs dense models at equal active parameter counts
+- [ ] Profile and optimize expert routing communication on GPU
+- [ ] Understand how frontier models (Mixtral, DeepSeek-V3, GPT-4) work internally
+
+---
+
+### Month 9 — Advanced Kernel Engineering + Compiler Optimization
+**Focus:** Triton compiler internals, torch.compile (TorchDynamo graph capture + TorchInductor code gen), operator fusion patterns, kernel autotuning, CUDA cooperative groups, warp specialization (Hopper), fused training kernels, gradient compression
+**Project:** KernelSmith — Custom Triton Kernel Library for LLMs
+
+**After this month, you can:**
+- [ ] Write production-quality Triton kernels for all common LLM operations
+- [ ] Build: fused attention, fused RMSNorm, fused SwiGLU, fused RoPE, fused cross-entropy, fused AdamW
+- [ ] Understand torch.compile internals and how TorchInductor generates GPU code
+- [ ] Automate kernel benchmarking with CI (every kernel tested against PyTorch native)
+- [ ] Build drop-in `nn.Module` replacements that are measurably faster than stock PyTorch
+- [ ] Implement gradient compression for communication optimization
+- [ ] **Your kernels are pip-installable and usable by anyone**
+
+---
+
+### Month 10 — Distributed Training at Scale + Production Systems
+**Focus:** Megatron-LM (3D parallelism: DP+TP+PP, sequence parallelism, context parallelism), DeepSpeed ZeRO-3, FSDP2, distributed checkpointing, training failure diagnosis, evaluation frameworks (lm-eval-harness, HELM, MMLU, HumanEval, MT-Bench), production MLOps, auto-scaling, A/B testing, NVIDIA AI Enterprise
+**Project:** TrainScale — Distributed LLM Training Framework
+
+**After this month, you can:**
+- [ ] Configure Megatron-LM for large-scale multi-node training
+- [ ] Train models larger than GPU memory using DeepSpeed ZeRO-3 and FSDP2
+- [ ] Implement fault-tolerant distributed checkpointing with resume
+- [ ] Build training cost estimators: predict time, cost, optimal DP/TP/PP config before training
+- [ ] Evaluate models comprehensively (MMLU, HumanEval, GSM8K, MT-Bench, and more)
+- [ ] Build production serving with auto-scaling, monitoring, and alerting
+- [ ] Implement semantic caching and multi-model routing (easy → small, hard → large)
+- [ ] Diagnose common training failures: loss spikes, gradient explosions, OOM
+
+---
+
+### Month 11 — Research Paper Implementation + Data Engineering
+**Focus:** Paper reading technique (figures → method → experiments), implementing algorithms from scratch, reproducing results, synthetic data pipelines (Self-Instruct, Evol-Instruct), NeMo Curator (GPU-accelerated curation), constrained decoding (outlines, GBNF), function calling training, code generation, Text-to-SQL
+**Project:** PaperBot — AI Research Paper Implementer
+
+**After this month, you can:**
+- [ ] Read any AI paper and extract the key algorithm into working code
+- [ ] Implement novel architectures and training techniques from publications
+- [ ] Reproduce experimental results and identify when papers are misleading
+- [ ] Build GPU-accelerated data curation pipelines: scrape → clean → dedupe → filter → tokenize
+- [ ] Generate high-quality synthetic instruction and preference data
+- [ ] Implement grammar-constrained generation (guaranteed valid JSON output)
+- [ ] Train function-calling and code generation models
+- [ ] **You can now turn any paper into a working prototype**
+
+---
+
+### Month 12 — Test-Time Compute + Reasoning + RL for LLMs
+**Focus:** RL foundations (MDP, policy gradient, REINFORCE, Actor-Critic, advantage, GAE), PPO, GRPO (DeepSeek), full RLHF pipeline (SFT → reward model → PPO + KL penalty), RLAIF, process reward models, chain-of-thought (zero-shot, few-shot), Tree of Thought, self-consistency, STaR, test-time compute scaling, MCTS for reasoning, adaptive compute allocation, DeepSeek-R1
+**Project:** ReasonEngine — Test-Time Compute for Better Answers
+
+**After this month, you can:**
+- [ ] Implement PPO and GRPO from scratch (RL fundamentals + LLM application)
+- [ ] Build full RLHF pipelines: SFT → reward model → PPO with KL penalty
+- [ ] Train process reward models that score individual reasoning steps
+- [ ] Build MCTS-based reasoning systems for hard math/logic problems
+- [ ] Implement adaptive compute: easy question = 1 pass, hard question = 64 samples + verification
+- [ ] Show accuracy vs compute curves (more inference compute = better answers)
+- [ ] Understand how reasoning models (o1, DeepSeek-R1) achieve step-by-step thinking
+- [ ] **You can make any LLM dramatically smarter on hard problems**
+
+---
+
+### Month 13 — Production LLM Serving + Advanced Alignment + Enterprise Agents
+**Focus:** NIM auto-scaling, multi-model serving, semantic caching, A/B testing with statistical significance, Guardrails advanced (Colang 2.0), AgentIQ enterprise patterns, MCP (Model Context Protocol), agent fine-tuning, tool-use training, advanced alignment (SPIN, ORPO, SimPO, iterative DPO), reward hacking prevention
+**Project:** NVServe — Production LLM Serving Platform
+
+**After this month, you can:**
+- [ ] Build production-grade serving with auto-scaling on Kubernetes
+- [ ] Route requests across multiple models based on complexity, cost, or latency targets
+- [ ] A/B test model versions with statistical significance
+- [ ] Implement MCP servers and clients for standardized tool interfaces
+- [ ] Compare 5+ alignment methods (DPO, PPO, GRPO, ORPO, SimPO) on the same base model
+- [ ] Detect and prevent reward hacking in alignment training
+- [ ] Build self-improving model pipelines (generate → evaluate → retrain)
+- [ ] **You can deploy and manage LLMs at enterprise scale**
+
+---
+
+### Month 14 — Synthetic Data Engineering + Advanced RAG
+**Focus:** Quality-aware synthetic data generation loops, data contamination detection, NeMo Curator at scale (dedup, PII, quality scoring), advanced retrieval (ColBERT, SPLADE, RAPTOR), multi-hop RAG, structured data RAG (SQL generation, table retrieval), RAG + tool use, domain adaptation
+**Project:** SynthData — GPU-Accelerated Synthetic Data Factory
+
+**After this month, you can:**
+- [ ] Build quality-aware data generation loops: generate → score → filter → iterate
+- [ ] Use NeMo Curator for GPU-accelerated deduplication, PII filtering, quality scoring
+- [ ] Detect data contamination in training sets
+- [ ] Build state-of-the-art RAG with ColBERT late interaction and RAPTOR hierarchical retrieval
+- [ ] Handle multi-hop questions requiring multiple retrieval steps
+- [ ] Demonstrate measurable model improvement from synthetic data vs human-curated data
+- [ ] Build domain-specific data pipelines from seed examples to full training set
+- [ ] **Your synthetic data is good enough to train production models**
+
+---
+
+### Month 15 — Enterprise AI Agents (Full NVIDIA Stack)
+**Focus:** NIM (LLM + embedding + reranking), NeMo Guardrails (Colang 2.0), AgentIQ orchestration, Riva voice I/O, multi-agent coordination, agent capability benchmarking across 10 dimensions, advanced evaluation
+**Project:** AgentX — Enterprise AI Agent with Full NVIDIA Stack
+
+**After this month, you can:**
+- [ ] Build enterprise-grade AI agents using every relevant NVIDIA tool simultaneously
+- [ ] Design and run 50-question agent capability benchmarks across 10 dimensions
+- [ ] Build voice-enabled agents: Riva ASR → LLM NIM → Riva TTS
+- [ ] Orchestrate specialized sub-agents for different task types
+- [ ] Generate radar chart visualizations of agent capabilities vs baselines
+- [ ] Deploy production agents with monitoring, safety rails, and per-task cost tracking
+- [ ] **You can architect and deliver complete AI agent solutions for enterprise use**
+
+---
+
+### Month 16 — Open-Source Contributions
+**Focus:** Contributing to major AI projects (vLLM, TensorRT-LLM, NeMo, HuggingFace transformers/trl/PEFT), navigating large codebases, finding and fixing performance issues, technical writing
+**Project:** OpenContrib — Major Open-Source Contribution
+
+**After this month, you can:**
+- [ ] Navigate and understand codebases with 100K+ lines (vLLM, Megatron, NeMo)
+- [ ] Identify performance bottlenecks in production AI tools
+- [ ] Submit meaningful PRs that get merged into projects used by thousands of developers
+- [ ] Write technical blog posts that explain complex systems clearly
+- [ ] **You are a recognized contributor to the AI open-source ecosystem**
+
+---
+
+### Months 17-18 — Magnum Opus: Your Signature Project
+**Focus:** Combining all 16 months of skills into one definitive project. Technical writing, demo creation, portfolio polish. Choose: LLM-from-Scratch-to-Production, AI Agent OS, or GPU Inference Engine.
+**Project:** Magnum Opus — The Project People Remember You By
+
+**After these months, you can:**
+- [ ] Design and execute a large-scale AI project from zero to production
+- [ ] Train domain-specific LLMs (1-3B params): data curation → pre-training → SFT → DPO → quantize → deploy
+- [ ] OR build a custom inference engine competitive with vLLM/TensorRT-LLM
+- [ ] OR build an agent OS with plugin architecture, self-improvement, and multi-model routing
+- [ ] Write 2000+ word technical deep-dives with architecture diagrams
+- [ ] Present your work with polished demo videos and live hosted demos
+- [ ] **You have a portfolio demonstrating mastery of CUDA + LLMs + production systems + NVIDIA stack**
+- [ ] **You can lead AI infrastructure projects at NVIDIA or any top AI company**
+
+---
+
 # ═══════════════════════════════════════════════
 # PHASE 1: FOUNDATIONS (Weeks 1-12, Months 1-3)
 # GPU Architecture, CUDA, Neural Nets, Transformers
