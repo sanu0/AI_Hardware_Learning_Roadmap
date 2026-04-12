@@ -1,4 +1,4 @@
-# Week 1, Day 5: Neural Networks from First Principles
+# Week 1 , Day 5: Neural Networks from First Principles
 ## Build a Neural Network from Scratch — Then See It Run on Your GPU
 
 Yesterday you wrote CUDA kernels. Today you build the thing those kernels
