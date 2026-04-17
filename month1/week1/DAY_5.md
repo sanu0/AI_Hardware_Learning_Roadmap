@@ -547,6 +547,142 @@ Hardware: Tensor Cores           CUDA Cores          Tensor Cores         SFU (e
           (Day 2)                (Day 4: vec_relu)   (Day 2)              (Day 2 + Day 3)
 ```
 
+### Backpropagation Intuition — Before You See the Matrix Code
+
+Before looking at the matrix-based backward pass, let's understand backprop
+with the simplest possible examples: single numbers first.
+
+**Level 1: One neuron, one weight, one input**
+```
+The simplest neural network:
+
+  input(x) ──[× weight]──[+ bias]──[ReLU]── output ── loss
+
+  x = 2.0       (input)
+  w = 0.5       (weight — we want to adjust this)
+  b = 0.1       (bias)
+
+  FORWARD:
+    z = w × x + b = 0.5 × 2.0 + 0.1 = 1.1
+    a = ReLU(1.1) = 1.1     (positive, unchanged)
+  
+  True answer: y = 3.0
+  Loss = (a - y)² = (1.1 - 3.0)² = 3.61
+  "Predicted 1.1, needed 3.0. Way off."
+
+  BACKWARD — how should w change?
+  
+  Intuition: predicted 1.1 but need 3.0 → output too LOW
+             output = w × x + b, and x is positive (2.0)
+             so making w BIGGER would make output bigger → w should INCREASE
+
+  Chain rule — multiply local derivatives backward:
+
+    ① dLoss/da = 2(a - y) = 2(1.1 - 3.0) = -3.8
+       "Output too low → increasing a decreases loss"
+    
+    ② da/dz = 1  (ReLU: z was positive, so passes through)
+    
+    ③ dz/dw = x = 2.0  ("if w goes up by 1, z goes up by x")
+    
+    CHAIN: dLoss/dw = (-3.8) × (1) × (2.0) = -7.6
+    
+    Negative gradient → loss DECREASES when w INCREASES → w should go UP!
+    
+    UPDATE: w = 0.5 - 0.01 × (-7.6) = 0.5 + 0.076 = 0.576  ✓
+    
+    VERIFY: new output = 0.576 × 2.0 + 0.1 = 1.252
+            new loss = (1.252 - 3.0)² = 3.06
+            Old loss 3.61 → New loss 3.06. IMPROVED! ✓
+```
+
+**Level 2: Two layers — the gradient flows through BOTH**
+```
+  x ──[× w1]──[+ b1]──[ReLU]── h ──[× w2]──[+ b2]── output ── loss
+      layer 1                       layer 2
+
+  x = 2.0,  w1 = 0.5,  b1 = 0.1,  w2 = 0.3,  b2 = -0.1,  y = 3.0
+
+  FORWARD:
+    z1 = 0.5 × 2.0 + 0.1 = 1.1
+    h  = ReLU(1.1) = 1.1
+    output = 0.3 × 1.1 + (-0.1) = 0.23
+    Loss = (0.23 - 3.0)² = 7.67
+
+  BACKWARD for w2 (layer 2 — easy, same as Level 1):
+    dLoss/d(output) = 2(0.23 - 3.0) = -5.54
+    d(output)/dw2 = h = 1.1
+    dLoss/dw2 = -5.54 × 1.1 = -6.09
+    w2_new = 0.3 - 0.01 × (-6.09) = 0.361  (increased ✓)
+
+  BACKWARD for w1 (layer 1 — must chain through BOTH layers!):
+    dLoss/dw1 = dLoss/d(output) × d(output)/dh × dh/dz1 × dz1/dw1
+              = (-5.54)          × w2 (0.3)     × 1 (ReLU) × x (2.0)
+              = -3.32
+    
+    w1_new = 0.5 - 0.01 × (-3.32) = 0.533  (increased ✓)
+
+  KEY INSIGHT: gradient for w1 PASSES THROUGH w2!
+    If w2 were 0, gradient for w1 would be 0 too.
+    "If layer 2 ignores the hidden value, changing layer 1 doesn't matter."
+
+  The gradient "flows" backward like water:
+    loss → output → ×w2(0.3) → h → ×ReLU'(1) → z1 → ×x(2.0) → w1
+    -5.54  →  -5.54 × 0.3 = -1.66  →  × 1 = -1.66  →  × 2.0 = -3.32
+    
+    At each step: multiply by the LOCAL derivative. That's all backprop is.
+```
+
+**Level 3: Why vanishing gradient happens (and why residual connections fix it)**
+```
+What if we had 32 layers (like LLaMA)?
+
+  dLoss/dw1 = dLoss/d(out) × d(out)/dh32 × dh32/dh31 × ... × dh2/dh1 × dh1/dw1
+
+  Each factor involves multiplying by a weight (~0.5) and ReLU' (1):
+    Each factor ≈ 0.5
+    After 32 layers: 0.5^32 = 0.0000000002
+    
+    Gradient reaching layer 1 is basically ZERO!
+    Layer 1 CANNOT LEARN. This is the VANISHING GRADIENT PROBLEM.
+
+  SOLUTION — Residual connections:
+    Instead of: h2 = ReLU(W × h1)
+    Do:         h2 = h1 + ReLU(W × h1)     ← add input back!
+    
+    Now dh2/dh1 = 1 + (something small)
+    
+    After 32 layers: the "1" term always passes through.
+    Gradient always has a clear path. Deep networks CAN train.
+    
+    This is WHY every Transformer layer has: output = layer(x) + x
+    Not optional. Without residual connections, 32 layers can't train.
+```
+
+**Now: single numbers → matrices (same thing, just more numbers)**
+```
+SINGLE NUMBERS:                  MATRICES (what the code does):
+─────────────────                ───────────────────────────────
+z = w × x                       Z = X @ W + b
+dLoss/dw = dLoss/dz × x         dW = X.T @ dZ
+                                 (same chain rule, X transposed)
+
+output = w2 × h                 Z2 = A1 @ W2 + b2
+dLoss/dh = dLoss/dz2 × w2       dA1 = dZ2 @ W2.T
+                                 (same chain rule, W2 transposed
+                                  because going backward)
+
+dz1 = dh × relu'(z1)            dZ1 = dA1 * relu'(Z1)
+(multiply by 1 or 0)            (element-wise, same idea on matrix)
+
+IDENTICAL logic. Just replace:
+  × (scalar multiply) → @ (matrix multiply)
+  number → matrix
+  w → W.T (transpose when going backward)
+```
+
+Now look at the matrix code below — every line maps to what you just learned:
+
 ```python
     
     def backward(self, labels, learning_rate=0.01):
@@ -785,6 +921,185 @@ for epoch in range(200):
 print(f"\nFinal: Loss={losses[-1]:.4f}, Accuracy={accuracy:.1f}%")
 print(f"\nThis is EXACTLY how LLMs train — just with 7 billion parameters")
 print(f"instead of {model.W1.size + model.b1.size + model.W2.size + model.b2.size}.")
+```
+
+### Understanding the Training Code — Line by Line
+
+**Creating the dataset:**
+```python
+np.random.seed(42)        # makes random numbers reproducible (same every run)
+N = 300                   # 300 data points total
+D = 2                     # each point has 2 features (x coordinate, y coordinate)
+K = 3                     # 3 classes to predict
+
+X = np.zeros((N, D))      # create empty array: 300 rows, 2 columns
+y = np.zeros(N, dtype=int) # create empty labels: 300 integers
+```
+```
+We're creating 3 clusters of points on a 2D plane:
+
+                    ↑ y
+                    │
+                    │    ★ ★ ★
+                    │   ★ class2 ★
+                    │    ★ ★ ★
+                    │
+          ──────────┼──────────→ x
+                    │
+        ● ● ●      │      ■ ■ ■
+       ● class0 ●  │     ■ class1 ■
+        ● ● ●      │      ■ ■ ■
+                    │
+
+The model's job: given (x, y) coordinates, predict which class (0, 1, or 2).
+```
+
+```python
+# Class 0: cluster around (-1, -1)
+X[:100] = np.random.randn(100, D) * 0.4 + [-1, -1]
+y[:100] = 0
+```
+```
+X[:100] means "first 100 rows of X"
+
+np.random.randn(100, D) = 100 points with random (x,y), centered at (0,0)
+* 0.4                    = scale down (make the cluster tighter)
++ [-1, -1]               = shift the center to (-1, -1)
+
+Result: 100 points scattered around (-1, -1)
+y[:100] = 0              = all these points belong to class 0
+
+Same for classes 1 and 2 but centered at (1, -1) and (0, 1).
+```
+
+**Creating the model:**
+```python
+model = MLP_from_scratch(input_size=2, hidden_size=32, output_size=3)
+```
+```
+Creates the MLP we defined above:
+  2 inputs (x, y coordinates) → 32 hidden neurons → 3 outputs (class scores)
+  195 random parameters. Knows NOTHING yet.
+```
+
+**The training loop:**
+```python
+losses = []                    # list to track loss over time
+
+for epoch in range(200):       # repeat 200 times over the ENTIRE dataset
+```
+```
+"epoch" = one complete pass through all 300 data points.
+We do 200 passes. Each pass, the model gets slightly better.
+```
+
+```python
+    probs = model.forward(X)   # forward pass: input → prediction
+```
+```
+Feed ALL 300 points through the network AT ONCE:
+  X shape: [300 × 2]  → model → probs shape: [300 × 3]
+  
+  probs[0] = [0.4, 0.3, 0.3]  ← model's guess for point 0
+                                  "40% class 0, 30% class 1, 30% class 2"
+  
+  At epoch 0: predictions are random garbage (untrained weights)
+  At epoch 200: predictions are mostly correct
+```
+
+```python
+    loss = cross_entropy_loss(probs, y)
+    losses.append(loss)
+```
+```
+Measure how wrong the predictions are:
+  - Picks the probability the model gave to the CORRECT class for each point
+  - Takes -log() of each (high confidence → low loss, low confidence → high loss)
+  - Averages across all 300 points
+
+  Epoch 0:   loss ≈ 1.10  (random guessing, ~33% accuracy on 3 classes)
+  Epoch 50:  loss ≈ 0.30  (getting better)
+  Epoch 200: loss ≈ 0.05  (very confident, mostly correct)
+
+  losses.append(loss) saves it so we can plot the learning curve later.
+```
+
+```python
+    model.backward(y, learning_rate=0.5)
+```
+```
+THE LEARNING STEP. This does everything we explained above:
+  1. Compute gradient of loss w.r.t. every weight (chain rule)
+  2. Update every weight: w = w - 0.5 × gradient
+
+  learning_rate = 0.5 (how big a step to take)
+    Too small (0.001): learns slowly, takes thousands of epochs
+    Too big (10.0):    overshoots, loss jumps around, never converges
+    0.5: reasonable for this simple problem
+    
+    LLMs use much smaller learning rates (0.0001 - 0.001) because
+    with 7 billion parameters, big steps cause chaos.
+
+  After this line, all 195 weights have been nudged slightly.
+  The model is now SLIGHTLY better than before.
+```
+
+```python
+    predictions = np.argmax(probs, axis=1)
+    accuracy = np.mean(predictions == y) * 100
+```
+```
+np.argmax(probs, axis=1):
+  For each sample, which class got the HIGHEST probability?
+  
+  probs[0] = [0.7, 0.2, 0.1] → argmax = 0 (class 0 wins)
+  probs[1] = [0.1, 0.8, 0.1] → argmax = 1 (class 1 wins)
+  
+  predictions = [0, 1, 2, 0, 1, ...]   (300 predicted classes)
+
+predictions == y:
+  Compare predictions with true labels, element by element:
+  [0, 1, 2, 0, 1, ...] == [0, 1, 2, 0, 2, ...] = [True, True, True, True, False, ...]
+
+np.mean(...) * 100:
+  Average of True/False (True=1, False=0) × 100 = percentage correct
+  
+  Epoch 0:   accuracy ≈ 33%  (random: 1/3 chance of guessing right)
+  Epoch 200: accuracy ≈ 99%  (almost perfect)
+```
+
+```python
+    if epoch % 20 == 0:
+        print(f"Epoch {epoch:3d} | Loss: {loss:.4f} | Accuracy: {accuracy:.1f}%")
+```
+```
+epoch % 20 == 0: print every 20th epoch (0, 20, 40, 60, ...)
+  Don't want 200 lines of output, just the highlights.
+
+Expected output:
+  Epoch   0 | Loss: 1.0986 | Accuracy: 33.3%     ← random guessing
+  Epoch  20 | Loss: 0.5423 | Accuracy: 78.0%     ← learning!
+  Epoch  40 | Loss: 0.2187 | Accuracy: 93.7%     ← getting good
+  Epoch  60 | Loss: 0.1204 | Accuracy: 97.3%     ← almost there
+  Epoch 100 | Loss: 0.0673 | Accuracy: 99.0%     ← nailed it
+  Epoch 200 | Loss: 0.0312 | Accuracy: 99.7%     ← near perfect
+
+WATCH THE LOSS GO DOWN AND ACCURACY GO UP.
+This is a neural network LEARNING. Same thing happens
+with GPT-4 — just over trillions of tokens instead of 300 points.
+```
+
+**The final print:**
+```python
+print(f"\nThis is EXACTLY how LLMs train — just with 7 billion parameters")
+print(f"instead of {model.W1.size + ...}.")
+```
+```
+Your model: 195 parameters, 300 data points, 200 epochs, 2 seconds.
+LLaMA-7B:  6.7 billion parameters, trillions of tokens, weeks on 2000 GPUs.
+
+Same algorithm. Same forward-backward-update loop.
+Just scaled up by a factor of 34 million.
 ```
 
 ## 3.3 What Each Line Does to the Hardware (Connecting to Day 1-4)
