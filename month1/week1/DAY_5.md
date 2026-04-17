@@ -252,6 +252,124 @@ def cross_entropy_loss(probs, labels):
     # probs[i, labels[i]] = probability assigned to the correct class
     correct_probs = probs[np.arange(n), labels]
     return -np.mean(np.log(correct_probs + 1e-8))
+```
+
+### Understanding Softmax — Line by Line
+
+**What it does:** Takes raw scores (any numbers) → converts to probabilities (all positive, sum to 1.0).
+Used in TWO places in LLMs: (1) attention weights, (2) next-token prediction.
+
+**`exp(x)` means eˣ** where e = 2.71828. It makes all values positive and amplifies differences:
+```
+exp(0)  = 1.0       exp(2)  = 7.39       exp(-2) = 0.14
+exp(1)  = 2.72      exp(10) = 22,026     exp(-10) = 0.00005
+```
+
+**Step by step with real numbers:**
+```
+Input x (raw scores for 2 samples, 3 classes each):
+  x = [[2.0, 1.0, 0.1],      ← sample 0
+       [0.5, 2.5, 1.0]]      ← sample 1
+
+STEP 1: Subtract max per row (prevents exp() from exploding)
+  Row 0 max = 2.0,  Row 1 max = 2.5
+  
+  x - max = [[0.0, -1.0, -1.9],     ← subtracted 2.0
+             [-2.0, 0.0, -1.5]]     ← subtracted 2.5
+  
+  This is safe because softmax([2, 1, 0.1]) = softmax([0, -1, -1.9])
+  The subtraction doesn't change the result, only prevents overflow.
+
+STEP 2: Apply exp() to every element
+  exp_x = [[1.000, 0.368, 0.150],   ← e^0, e^(-1), e^(-1.9)
+           [0.135, 1.000, 0.223]]   ← e^(-2), e^0, e^(-1.5)
+
+  Now everything is POSITIVE (exp always returns positive numbers).
+
+STEP 3: Divide each row by its sum
+  Row 0 sum = 1.000 + 0.368 + 0.150 = 1.518
+  Row 1 sum = 0.135 + 1.000 + 0.223 = 1.358
+  
+  result = [[1.000/1.518, 0.368/1.518, 0.150/1.518],
+            [0.135/1.358, 1.000/1.358, 0.223/1.358]]
+  
+         = [[0.659, 0.242, 0.099],   ← sums to 1.0 ✓
+            [0.099, 0.737, 0.164]]   ← sums to 1.0 ✓
+
+  The LARGEST input always gets the LARGEST probability.
+  Sample 0: input 2.0 was largest → 0.659 is largest ✓
+  Sample 1: input 2.5 was largest → 0.737 is largest ✓
+```
+
+**Hardware connection:** exp() runs on the GPU's **SFU** (Special Function Unit).
+The sum is a **parallel reduction** (you'll implement this in Week 3).
+
+### Understanding Cross-Entropy Loss — Line by Line
+
+**What it does:** Measures how wrong the model's predictions are.
+Low loss = model put high probability on the correct answer = good.
+High loss = model put low probability on the correct answer = bad.
+
+**This is THE loss function for LLM training.** Every single training step computes this.
+
+**The key insight — why use -log()?**
+```
+If model predicts the correct token with probability:
+  0.99 → loss = -log(0.99) = 0.01    ← almost zero, great!
+  0.50 → loss = -log(0.50) = 0.69    ← moderate
+  0.10 → loss = -log(0.10) = 2.30    ← high, model is unsure
+  0.01 → loss = -log(0.01) = 4.61    ← very high, model is wrong!
+  0.001→ loss = -log(0.001)= 6.91    ← terrible!
+
+-log() punishes confident wrong answers MUCH more than uncertain ones.
+This forces the model to put high probability on the right answer.
+```
+
+**Step by step with real numbers:**
+```
+probs  = [[0.659, 0.242, 0.099],   ← softmax output for sample 0
+          [0.099, 0.737, 0.164]]   ← softmax output for sample 1
+labels = [0, 1]                     ← correct class: sample 0 is class 0,
+                                                      sample 1 is class 1
+
+STEP 1: Pick the probability assigned to the CORRECT class
+  correct_probs = probs[np.arange(n), labels]
+  
+  np.arange(2) = [0, 1]     ← sample indices
+  labels       = [0, 1]     ← correct class indices
+  
+  probs[0, 0] = 0.659       ← sample 0, correct class 0
+  probs[1, 1] = 0.737       ← sample 1, correct class 1
+  
+  correct_probs = [0.659, 0.737]
+  "Model gave 65.9% to the right answer for sample 0,
+   and 73.7% for sample 1."
+
+STEP 2: Apply -log() and average
+  -log([0.659, 0.737]) = -[-0.417, -0.305] = [0.417, 0.305]
+  
+  mean([0.417, 0.305]) = 0.361
+  
+  Loss = 0.361
+
+  The + 1e-8 (0.00000001) is a safety net to prevent log(0) = -infinity.
+```
+
+**How this drives LLM training:**
+```
+1. Model sees "The capital of France is" → predicts P("Paris") = 0.02
+2. Loss = -log(0.02) = 3.91  ← HIGH! Gradients are large.
+3. Weights get nudged to increase P("Paris").
+4. After many updates: P("Paris") = 0.85 → loss = -log(0.85) = 0.16  ← LOW!
+5. Repeat for trillions of tokens. That's LLM training.
+
+Perplexity = exp(average_loss)
+  Perplexity of 10 = "model is as confused as randomly picking from 10 options"
+  Lower perplexity = better model.
+  GPT-4 level: perplexity ~3-5 on typical text.
+```
+
+```python
 
 # ============ THE MLP CLASS ============
 
@@ -268,6 +386,68 @@ class MLP_from_scratch:
         print(f"  Layer 1: [{input_size} × {hidden_size}] + [{hidden_size}] = {input_size*hidden_size + hidden_size} params")
         print(f"  Layer 2: [{hidden_size} × {output_size}] + [{output_size}] = {hidden_size*output_size + output_size} params")
         print(f"  Total: {input_size*hidden_size + hidden_size + hidden_size*output_size + output_size} parameters")
+```
+
+### Understanding the Constructor — Line by Line
+
+When you call `model = MLP_from_scratch(input_size=2, hidden_size=32, output_size=3)`:
+```
+  input_size  = 2   (data has 2 features: x and y coordinates)
+  hidden_size = 32  (hidden layer has 32 neurons)
+  output_size = 3   (3 classes to predict)
+```
+
+**Weight initialization:**
+```python
+self.W1 = np.random.randn(input_size, hidden_size) * np.sqrt(2.0 / input_size)
+```
+```
+np.random.randn(2, 32) creates a [2 × 32] matrix of random numbers.
+
+But raw random numbers are too large — training would be unstable.
+So we SCALE them with Xavier/He initialization: multiply by sqrt(2 / input_size)
+
+  For input_size=2:   sqrt(2/2)   = 1.0   (weights stay ~normal)
+  For input_size=784:  sqrt(2/784) = 0.05  (weights become tiny: 0.03, -0.02, etc.)
+
+WHY small weights?
+  Too large → outputs explode → gradients explode → training crashes
+  Too small → outputs vanish → gradients vanish → nothing learns
+  Xavier/He initialization hits the sweet spot for stable training.
+```
+
+**Bias initialization:**
+```python
+self.b1 = np.zeros(hidden_size)   # [32] — all zeros, will learn during training
+```
+
+**What we created:**
+```
+Total parameters:
+  W1: 2 × 32  =  64 weights    (each hidden neuron has 2 input weights)
+  b1: 32       =  32 biases     (one per hidden neuron)
+  W2: 32 × 3  =  96 weights    (each output neuron has 32 input weights)
+  b2: 3        =   3 biases     (one per output neuron)
+  Total:       = 195 parameters
+
+These 195 numbers ARE the model.
+They start random and get adjusted during training.
+
+  input (2)          hidden (32)          output (3)
+  ┌───┐    W1[2×32]   ┌───┐    W2[32×3]   ┌───┐
+  │ x₁│──────────────→│ h₁│──────────────→│ o₁│ → class 0 score
+  │   │    64 weights  │ h₂│  96 weights   │ o₂│ → class 1 score
+  │ x₂│──────────────→│...│──────────────→│ o₃│ → class 2 score
+  └───┘    + 32 biases │h₃₂│  + 3 biases   └───┘
+                       └───┘
+                       ↑ ReLU              ↑ softmax
+                       activation          (probabilities)
+
+Compare: Your model = 195 params. LLaMA-7B = 6,700,000,000 params.
+Same concept, just 34 million times larger.
+```
+
+```python
     
     def forward(self, X):
         """
@@ -286,6 +466,88 @@ class MLP_from_scratch:
         self.X = X
         
         return self.a2
+```
+
+### Understanding the Forward Pass — Line by Line
+
+The forward pass takes input data and pushes it through the network to get predictions.
+
+```
+Example input — 3 samples, each with 2 features (x, y coordinates):
+  X = [[0.5, 0.3],    ← sample 0
+       [1.0, -0.2],   ← sample 1
+       [-0.8, 0.9]]   ← sample 2
+  Shape: [3 × 2]  (batch_size=3, input_size=2)
+```
+
+**Layer 1 — Linear: `self.z1 = X @ self.W1 + self.b1`**
+```
+Matrix multiply transforms 2 inputs → 32 hidden values:
+
+  X    [3 × 2]  @  W1 [2 × 32]  =  [3 × 32]    + b1 [32]
+  
+  Each hidden neuron computes: z = weight1 × x₁ + weight2 × x₂ + bias
+  All 3 samples processed AT ONCE (that's the batch dimension).
+  
+  Result z1: [3 × 32] — "3 samples, each now has 32 numbers"
+```
+
+**Layer 1 — Activation: `self.a1 = relu(self.z1)`**
+```
+Apply ReLU (max(0, x)) to every number in [3 × 32]:
+
+  z1 = [[ 0.42, -0.13,  0.87, ...],     a1 = [[ 0.42,  0.00,  0.87, ...],
+        [-0.25,  0.56,  0.31, ...],    →       [ 0.00,  0.56,  0.31, ...],
+        [ 0.11, -0.78,  0.05, ...]]            [ 0.11,  0.00,  0.05, ...]]
+              ↑ negative → zeroed                      ↑ zeroed
+
+We save z1 because backward pass needs the ORIGINAL values
+to compute ReLU's derivative (1 if positive, 0 if negative).
+```
+
+**Layer 2 — Linear: `self.z2 = self.a1 @ self.W2 + self.b2`**
+```
+Matrix multiply transforms 32 hidden values → 3 class scores:
+
+  a1 [3 × 32]  @  W2 [32 × 3]  =  [3 × 3]    + b2 [3]
+  
+  z2 = [[ 1.2,  0.3, -0.5],     ← sample 0: class 0 highest
+        [-0.1,  2.1,  0.4],     ← sample 1: class 1 highest
+        [ 0.3,  0.1,  1.8]]     ← sample 2: class 2 highest
+
+These are RAW SCORES (logits) — can be any number, not probabilities yet.
+```
+
+**Layer 2 — Softmax: `self.a2 = softmax(self.z2)`**
+```
+Softmax converts raw scores → probabilities (each row sums to 1.0):
+
+  z2 = [[ 1.2,  0.3, -0.5],        a2 = [[ 0.659, 0.268, 0.120],  sum=1.0 ✓
+        [-0.1,  2.1,  0.4],    →         [ 0.088, 0.795, 0.145],  sum=1.0 ✓
+        [ 0.3,  0.1,  1.8]]              [ 0.127, 0.104, 0.569]]  sum=1.0 ✓
+
+Model's predictions:
+  Sample 0: 65.9% class 0, 26.8% class 1, 12.0% class 2
+  Sample 1: 8.8% class 0, 79.5% class 1, 14.5% class 2
+  Sample 2: 12.7% class 0, 10.4% class 1, 56.9% class 2
+```
+
+**`self.X = X` — save input for backward pass** (needed to compute dW1).
+
+**Complete data flow through forward():**
+```
+X [3×2] → z1=X@W1+b1 [3×32] → a1=ReLU(z1) [3×32] → z2=a1@W2+b2 [3×3] → a2=softmax(z2) [3×3]
+
+input     matrix multiply       kill negatives      matrix multiply      scores → probabilities
+2 nums    + bias                                     + bias               
+/sample   32 nums now                                3 nums now           3 probabilities
+          (hidden repr.)                             (class scores)       (final prediction)
+
+Hardware: Tensor Cores           CUDA Cores          Tensor Cores         SFU (exp) + reduction
+          (Day 2)                (Day 4: vec_relu)   (Day 2)              (Day 2 + Day 3)
+```
+
+```python
     
     def backward(self, labels, learning_rate=0.01):
         """
@@ -321,6 +583,153 @@ class MLP_from_scratch:
         self.b1 -= learning_rate * db1
         self.W2 -= learning_rate * dW2
         self.b2 -= learning_rate * db2
+```
+
+### Understanding the Backward Pass — Line by Line
+
+Backpropagation figures out HOW to nudge each weight to reduce the loss.
+It works backwards: output layer first, then hidden layer, using the chain rule.
+
+**Step 1: Output Layer Gradient — "How wrong was each prediction?"**
+```python
+dz2 = self.a2.copy()
+dz2[np.arange(batch_size), labels] -= 1
+dz2 /= batch_size
+```
+```
+For softmax + cross-entropy combined, the gradient simplifies to:
+  dL/dz2 = predictions - true_answer
+
+self.a2 (predictions from forward pass):
+  [[0.659, 0.268, 0.120],    ← sample 0 predicted class 0 (65.9%)
+   [0.088, 0.795, 0.145],    ← sample 1 predicted class 1 (79.5%)
+   [0.127, 0.104, 0.569]]    ← sample 2 predicted class 2 (56.9%)
+
+labels = [0, 1, 2]
+
+Subtract 1 from the CORRECT class position:
+  dz2[0, 0]: 0.659 - 1 = -0.341  (class 0 correct for sample 0)
+  dz2[1, 1]: 0.795 - 1 = -0.205  (class 1 correct for sample 1)
+  dz2[2, 2]: 0.569 - 1 = -0.431  (class 2 correct for sample 2)
+
+  dz2 = [[-0.341,  0.268,  0.120],
+         [ 0.088, -0.205,  0.145],
+         [ 0.127,  0.104, -0.431]]
+
+Divide by batch_size (3) to average:
+  dz2 = [[-0.114,  0.089,  0.040],
+         [ 0.029, -0.068,  0.048],
+         [ 0.042,  0.035, -0.144]]
+
+HOW TO READ:
+  Negative = "increase this score"  (correct class needs more probability)
+  Positive = "decrease this score"  (wrong class got too much probability)
+  Bigger number = bigger nudge needed.
+  Sample 2 has -0.144 → needs biggest correction (was only 56.9% confident)
+```
+
+**Step 2: Gradients for W2 and b2 — "How should layer 2 weights change?"**
+```python
+dW2 = self.a1.T @ dz2      # [hidden × output] = [32 × 3]
+db2 = np.sum(dz2, axis=0)  # [output] = [3]
+```
+```
+  self.a1.T shape: [32 × 3]  (transposed hidden activations)
+  dz2 shape:       [3 × 3]   (output error)
+  dW2 shape:       [32 × 3]  (SAME shape as W2 — one gradient per weight!)
+
+  Each dW2[i][j] = "how much should the weight from hidden neuron i
+                    to output neuron j change?"
+  
+  db2 = sum of errors across samples = "how should each output bias change?"
+```
+
+**Step 3: Propagate error BACK to hidden layer (chain rule!)**
+```python
+da1 = dz2 @ self.W2.T      # [batch × hidden] = [3 × 32]
+```
+```
+"How much did each hidden neuron contribute to the output error?"
+
+  We multiply by W2 TRANSPOSED because we're going BACKWARDS:
+    Forward:  a1 @ W2   → z2     (multiply by W2)
+    Backward: dz2 @ W2.T → da1   (multiply by W2 transposed)
+
+  This IS the chain rule:
+    dL/da1 = dL/dz2 × dz2/da1 = dz2 × W2.T
+```
+
+**Step 4: Account for ReLU activation**
+```python
+dz1 = da1 * relu_derivative(self.z1)    # [batch × hidden]
+```
+```
+ReLU derivative:
+  If z1 was positive: derivative = 1 → gradient passes through
+  If z1 was negative: derivative = 0 → gradient is KILLED
+
+  da1 =      [[ 0.05, -0.02,  0.08, ...],
+              [-0.03,  0.01,  0.04, ...]]
+
+  relu_deriv = [[ 1,  0,  1, ...],    ← was z1 positive (1) or negative (0)?
+                [ 0,  1,  1, ...]]
+
+  dz1 = [[ 0.05,  0.00,  0.08, ...],  ← gradient killed where ReLU was 0
+         [ 0.00,  0.01,  0.04, ...]]
+
+  This is "dying ReLU" problem: if z1 is always negative, gradient
+  is always 0, neuron can never learn. Dead forever.
+```
+
+**Step 5: Gradients for W1 and b1**
+```python
+dW1 = self.X.T @ dz1       # [input × hidden] = [2 × 32] (same shape as W1)
+db1 = np.sum(dz1, axis=0)  # [hidden] = [32]
+```
+
+**Step 6: Update ALL weights (gradient descent)**
+```python
+self.W1 -= learning_rate * dW1
+self.b1 -= learning_rate * db1
+self.W2 -= learning_rate * dW2
+self.b2 -= learning_rate * db2
+```
+```
+  w_new = w_old - learning_rate × gradient
+
+  MINUS because gradient points UPHILL (toward higher loss).
+  We want to go DOWNHILL (toward lower loss).
+  
+  learning_rate = 0.01 (small step to avoid overshooting)
+  
+  Example: if dW1[0][5] = 0.03
+    W1[0][5] = W1[0][5] - 0.01 × 0.03 = W1[0][5] - 0.0003
+    → weight decreased by a tiny amount
+  
+  After this update, model is SLIGHTLY better.
+  Repeat 200 times → model learns the pattern.
+```
+
+**The complete backward flow:**
+```
+FORWARD (left → right):
+  X → z1=X@W1+b1 → a1=ReLU(z1) → z2=a1@W2+b2 → a2=softmax(z2) → loss
+
+BACKWARD (right → left, chain rule at each step):
+  loss → dz2=(a2-labels)/batch → dW2=a1.T@dz2         → update W2, b2
+                                → da1=dz2@W2.T
+                                → dz1=da1*relu'(z1)    → update W1, b1
+                                   → dW1=X.T@dz1
+
+On GPU hardware:
+  dW2 = a1.T @ dz2         → matrix multiply → Tensor Cores
+  da1 = dz2 @ W2.T         → matrix multiply → Tensor Cores
+  dz1 = da1 * relu'(z1)    → element-wise    → CUDA Cores
+  dW1 = X.T @ dz1          → matrix multiply → Tensor Cores
+
+Backward has SAME compute cost as forward (same matrix multiply sizes).
+That's why training takes ~3x memory of inference:
+  1x weights + 1x gradients + 1x saved activations (z1, a1, X from forward)
 ```
 
 ## 3.2 Train It on a Simple Dataset
