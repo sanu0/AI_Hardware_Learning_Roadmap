@@ -1537,6 +1537,73 @@ print(f"Image shape:      {train_dataset[0][0].shape}")  # [1, 28, 28]
 print(f"Batches per epoch: {len(train_loader)}")  # 60000/64 = 938
 ```
 
+### Understanding the Data Loading Code
+
+```python
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader
+```
+```
+torchvision: PyTorch's library for computer vision (has common datasets + transforms)
+DataLoader: PyTorch's tool for feeding data to models in batches
+```
+
+```python
+transform = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize((0.5,), (0.5,))
+])
+```
+```
+transforms.Compose: chain multiple transforms together (run in order)
+
+transforms.ToTensor():
+  Converts a PIL image (0-255 pixel values) → PyTorch tensor (0.0 to 1.0)
+  Also reshapes from [28, 28] → [1, 28, 28] (adds "channel" dimension)
+  The "1" = grayscale (1 channel). RGB images would be [3, 28, 28].
+
+transforms.Normalize((0.5,), (0.5,)):
+  Shifts values from [0, 1] → [-1, 1]
+  Formula: output = (input - 0.5) / 0.5
+  WHY: Neural networks learn better when inputs are centered around 0
+  instead of all positive. This is a standard trick.
+```
+
+```python
+train_dataset = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
+```
+```
+datasets.MNIST: downloads the MNIST dataset (60K train + 10K test images)
+  root='./data'    → save files in a ./data folder
+  train=True       → get the 60,000 training images
+  download=True    → download if not already present
+  transform=...    → apply our ToTensor + Normalize on every image
+
+Each item in the dataset is a tuple: (image_tensor, label)
+  train_dataset[0] = (tensor of shape [1, 28, 28], 5)  ← "image of digit 5"
+```
+
+```python
+train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+```
+```
+DataLoader wraps the dataset and gives you BATCHES:
+
+  batch_size=64: group 64 images together into one batch
+  WHY? Processing 64 images at once is much more GPU-efficient than one at a time.
+  Remember from Day 1: batching increases arithmetic intensity!
+
+  shuffle=True: randomize the order each epoch
+  WHY? If you always show class 0 first, then class 1, then class 2...
+  the model might "forget" class 0 by the time it sees class 2.
+  Shuffling ensures diverse batches.
+
+  When you iterate: for images, labels in train_loader:
+    images shape: [64, 1, 28, 28]  ← 64 images per batch
+    labels shape: [64]              ← 64 labels (0-9)
+    Total batches: 60000 / 64 = 938 batches per epoch
+```
+
 ## 6.2 MNIST MLP
 
 ```python
@@ -1558,58 +1625,235 @@ class MNIST_MLP(nn.Module):
         x = self.relu(self.layer2(x))
         x = self.layer3(x)        # output logits (no activation)
         return x
+```
 
-# Create model
+### Understanding the Model Code
+
+```python
+class MNIST_MLP(nn.Module):       # inherit from nn.Module (base class for all PyTorch models)
+    def __init__(self):
+        super().__init__()         # always call parent's __init__
+```
+
+```python
+        self.flatten = nn.Flatten()           # [1, 28, 28] → [784]
+```
+```
+Images come in as [1, 28, 28] (1 channel, 28 rows, 28 columns).
+But nn.Linear expects a 1D vector, not a 2D image.
+nn.Flatten() squashes [1, 28, 28] → [784] (1 × 28 × 28 = 784 numbers in a row).
+
+It's like unrolling a 2D grid into a single line:
+  Row 0: pixel 0-27
+  Row 1: pixel 28-55
+  ...
+  Row 27: pixel 756-783
+  Total: 784 pixels in a flat vector
+```
+
+```python
+        self.layer1 = nn.Linear(784, 256)     # 784 → 256
+        self.layer2 = nn.Linear(256, 128)     # 256 → 128
+        self.layer3 = nn.Linear(128, 10)      # 128 → 10 (digits)
+        self.relu = nn.ReLU()
+```
+```
+Three layers, getting smaller:  784 → 256 → 128 → 10
+
+  layer1: nn.Linear(784, 256)
+    Creates W: [784 × 256] = 200,704 weights + 256 biases
+    Takes 784 pixel values → outputs 256 hidden features
+
+  layer2: nn.Linear(256, 128)
+    Creates W: [256 × 128] = 32,768 weights + 128 biases
+    Takes 256 features → outputs 128 features
+
+  layer3: nn.Linear(128, 10)
+    Creates W: [128 × 10] = 1,280 weights + 10 biases
+    Takes 128 features → outputs 10 scores (one per digit 0-9)
+
+  Total parameters: 200,704 + 256 + 32,768 + 128 + 1,280 + 10 = 235,146
+```
+
+```python
+        total = sum(p.numel() for p in self.parameters())
+```
+```
+self.parameters() returns ALL learnable tensors (W1, b1, W2, b2, W3, b3)
+p.numel() = number of elements in each tensor
+sum(...) = total count = 235,146 parameters
+```
+
+```python
+    def forward(self, x):
+        x = self.flatten(x)                # [64, 1, 28, 28] → [64, 784]
+        x = self.relu(self.layer1(x))      # [64, 784] → linear → [64, 256] → ReLU
+        x = self.relu(self.layer2(x))      # [64, 256] → linear → [64, 128] → ReLU
+        x = self.layer3(x)                 # [64, 128] → linear → [64, 10]
+        return x                            # 10 raw scores (logits) per image
+```
+```
+Note: NO softmax at the end! Why?
+  nn.CrossEntropyLoss in PyTorch INCLUDES softmax internally.
+  It takes raw logits (any numbers) and applies softmax + cross-entropy together.
+  This is numerically more stable than doing softmax separately.
+  
+  So the model outputs RAW SCORES, not probabilities.
+  CrossEntropyLoss handles the conversion.
+```
+
+### Understanding the Setup Code
+
+```python
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = MNIST_MLP().to(device)
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+```
+```
+Choose GPU if available, else CPU.
+.to(device) moves ALL 235,146 parameters to GPU memory (cudaMemcpy).
+```
 
-# Training loop
-for epoch in range(5):
-    model.train()  # set to training mode (affects dropout, batchnorm)
-    total_loss = 0
-    correct = 0
-    total = 0
-    
+```python
+criterion = nn.CrossEntropyLoss()
+```
+```
+The loss function. Takes:
+  Input: raw logits [64, 10] (model output, NOT softmax'd)
+  Target: labels [64] (integers 0-9)
+  
+Does internally:
+  1. Apply softmax to logits → probabilities
+  2. Pick probability of correct class
+  3. Return -log(correct_probability) averaged over batch
+  
+This is EXACTLY the cross_entropy_loss() we built from scratch in Part 3!
+```
+
+```python
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+```
+```
+Adam optimizer: smarter than basic gradient descent.
+  - Keeps a running average of gradients (momentum)
+  - Keeps a running average of squared gradients (adaptive learning rate)
+  - Each weight gets its OWN effective learning rate
+  
+  lr=0.001: base learning rate
+  model.parameters(): "update THESE weights"
+  
+  Adam is what ALL LLM training uses (specifically AdamW variant).
+```
+
+### Understanding the Training Loop
+
+```python
+for epoch in range(5):                    # 5 complete passes through all 60,000 images
+    model.train()                          # enable training mode
+```
+```
+model.train(): tells PyTorch "I'm training now"
+  - Dropout layers will drop neurons randomly (regularization)
+  - BatchNorm will compute batch statistics
+  For our simple model it doesn't matter much, but it's good practice.
+```
+
+```python
     for batch_idx, (images, labels) in enumerate(train_loader):
         images, labels = images.to(device), labels.to(device)
-        
-        # Forward
-        outputs = model(images)
-        loss = criterion(outputs, labels)
-        
-        # Backward
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        
-        # Track accuracy
-        total_loss += loss.item()
-        _, predicted = outputs.max(1)
-        total += labels.size(0)
-        correct += predicted.eq(labels).sum().item()
+```
+```
+Loop through all 938 batches (64 images each):
+  images shape: [64, 1, 28, 28] — 64 grayscale images
+  labels shape: [64] — correct digit for each image
+
+  .to(device): move this batch from CPU → GPU (cudaMemcpy)
+  This happens 938 times per epoch — that's a LOT of transfers.
+  (In practice, pin_memory=True and num_workers>0 speed this up.)
+```
+
+```python
+        outputs = model(images)            # forward pass
+        loss = criterion(outputs, labels)  # compute loss
+```
+```
+outputs shape: [64, 10] — 10 scores per image
+loss: single number — average cross-entropy across 64 images
+```
+
+```python
+        optimizer.zero_grad()              # clear old gradients
+        loss.backward()                    # compute gradients (backprop)
+        optimizer.step()                   # update all 235K weights
+```
+```
+THE three-line training step. You'll write this thousands of times:
+  1. zero_grad:  clear old gradients (Pattern 3 from section 5.3)
+  2. backward:   compute ∂loss/∂w for every weight (chain rule through all layers)
+  3. step:       w = w - lr × gradient (Adam's version is fancier but same idea)
+
+After this, the model is SLIGHTLY better. 938 batches × 5 epochs = 4,690 updates.
+```
+
+```python
+        total_loss += loss.item()          # .item() extracts the number (Pattern 4)
+        _, predicted = outputs.max(1)      # which class has highest score?
+        total += labels.size(0)            # count total images seen
+        correct += predicted.eq(labels).sum().item()  # count correct predictions
+```
+```
+Tracking metrics during training:
+
+  loss.item(): extract float from tensor (avoids memory leak)
+
+  outputs.max(1):
+    outputs = [[1.2, -0.5, 3.1, ...],    ← 10 scores for image 0
+               [0.3,  4.2, -0.1, ...]]   ← 10 scores for image 1
     
-    train_acc = 100. * correct / total
-    avg_loss = total_loss / len(train_loader)
+    .max(1) returns (max_values, max_indices) along dimension 1 (columns)
+    max_values  = [3.1, 4.2, ...]    ← highest score per image
+    max_indices = [2, 1, ...]         ← which class had highest score
     
-    # Test accuracy
-    model.eval()  # set to evaluation mode
-    test_correct = 0
-    test_total = 0
-    with torch.no_grad():  # no gradients needed for evaluation
+    _ means "ignore max_values, I only want the indices"
+    predicted = [2, 1, ...]           ← model's guesses
+
+  predicted.eq(labels):
+    [2, 1, 5, 3] == [2, 1, 5, 7] = [True, True, True, False]
+  
+  .sum().item() = 3 (three correct out of four)
+```
+
+### Understanding the Test Evaluation
+
+```python
+    model.eval()                           # switch to evaluation mode
+    with torch.no_grad():                  # no gradient tracking (Pattern 1)
         for images, labels in test_loader:
             images, labels = images.to(device), labels.to(device)
             outputs = model(images)
             _, predicted = outputs.max(1)
-            test_total += labels.size(0)
             test_correct += predicted.eq(labels).sum().item()
-    
-    test_acc = 100. * test_correct / test_total
-    print(f"Epoch {epoch+1}/5 | Loss: {avg_loss:.4f} | Train Acc: {train_acc:.1f}% | Test Acc: {test_acc:.1f}%")
+```
+```
+model.eval(): tells PyTorch "I'm evaluating, not training"
+  - Dropout disabled (use all neurons)
+  - BatchNorm uses stored running stats
 
-print(f"\nGPU memory used: {torch.cuda.memory_allocated()/1024**2:.1f} MB")
-print(f"Expected test accuracy: ~97-98% (just from a simple MLP!)")
+torch.no_grad(): skip gradient tracking
+  - Faster (no computation graph built)
+  - Less memory (no activations stored)
+  
+Same forward pass as training, but:
+  ❌ No loss.backward() — we're not learning, just measuring
+  ❌ No optimizer.step() — no weight updates
+  ✅ Just forward pass → count how many it gets right
+
+Expected results:
+  Epoch 1: ~95% (learns fast in first epoch)
+  Epoch 3: ~97%
+  Epoch 5: ~97-98%
+
+97-98% accuracy on handwritten digits with a simple 3-layer MLP!
+Not bad for 235K parameters and 5 minutes of training.
 ```
 
 ---
