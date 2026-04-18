@@ -44,8 +44,8 @@
 > Build during the **revision week** at the end of each month.
 > These are the projects you put on your resume and GitHub.
 >
-> **Rule:** Project A = the one listed below (structured). Project B = YOUR idea
-> (must use current + previous month skills, must be novel). Come up with Project B yourself.
+> **Project A** = structured (detailed below). **Project B** = novel second project (also detailed below).
+> Both must use current month + all previous month skills. Built during revision week.
 
 ---
 
@@ -60,9 +60,21 @@
 - [ ] README with performance analysis and architecture diagrams
 - [ ] **Publish to GitHub**
 
+## Month 1 Project B: "LLM Inference Cost Simulator"
+**What:** A visual, interactive tool that simulates what happens inside a GPU during LLM inference — showing memory reads, Tensor Core utilization, and bottlenecks in real time.
+**Novelty:** Nobody has a visual simulator that shows "here's why your 7B model runs at 250 tok/s on H100 but only 60 tok/s on T4" with animated data flow diagrams.
+**Skills used:** CUDA memory hierarchy (Month 1), roofline model (Month 1), arithmetic intensity (Month 1), GPU architecture (Month 1)
+**Deliverables:**
+- [ ] Input: model config (params, layers, hidden dim) + GPU config (bandwidth, TFLOPS, HBM size)
+- [ ] Output: predicted tokens/sec, memory utilization %, compute utilization %, bottleneck identification
+- [ ] Animated visualization of data flowing: HBM → L2 → SM → Tensor Cores → back
+- [ ] Compare: FP32 vs FP16 vs INT4 on the same model/GPU combo
+- [ ] Web UI (Streamlit) or interactive notebook
+- [ ] **Publish to GitHub**
+
 ---
 
-## Month 2 Project: "nanoLLM — Your Own GPT from Scratch"
+## Month 2 Project A: "nanoLLM — Your Own GPT from Scratch"
 **What:** A complete, clean, well-documented GPT-2 (124M) implementation trained on a real corpus with a chat interface.
 **Novelty:** Not just the model — include a **hardware utilization dashboard** that shows during training: GPU utilization %, memory usage, Tensor Core utilization, tokens/sec. This is what distinguishes you from everyone who followed Karpathy's tutorial.
 **Deliverables:**
@@ -74,9 +86,21 @@
 - [ ] Training loss curves + sample generations at checkpoints
 - [ ] **Publish to GitHub with trained weights**
 
+## Month 2 Project B: "Attention Visualizer — See What Your Model Thinks"
+**What:** An interactive tool that loads any trained Transformer model, runs input through it, and visualizes attention patterns across all heads and layers with heatmaps.
+**Novelty:** Shows attention evolution ACROSS LAYERS (not just one layer) — watch how the model's "understanding" builds from raw tokens to deep meaning. Highlight which heads do positional attention, which do semantic, which are redundant.
+**Skills used:** Transformer architecture (Month 2), GPU profiling (Month 2), CUDA memory (Month 1), matmul (Month 1)
+**Deliverables:**
+- [ ] Load any HuggingFace model, extract attention weights from all layers/heads
+- [ ] Per-layer attention heatmap: which token attends to which
+- [ ] Cross-layer attention flow: track how attention patterns change layer by layer
+- [ ] Head importance analysis: which heads matter most (prune and measure quality drop)
+- [ ] Interactive web UI (Gradio/Streamlit)
+- [ ] **Publish to GitHub**
+
 ---
 
-## Month 3 Project: "LLM Surgery — Fine-Tuning & Alignment Toolkit"
+## Month 3 Project A: "LLM Surgery — Fine-Tuning & Alignment Toolkit"
 **What:** Take a pre-trained model and build a complete fine-tuning → alignment → deployment pipeline.
 **Novelty:** **Side-by-side comparison tool** — fine-tune the SAME base model with SFT only, SFT+DPO, and prompt-only approaches, then generate a comparative evaluation report showing exactly where alignment improves outputs (with specific examples and metrics).
 **Deliverables:**
@@ -88,9 +112,21 @@
 - [ ] Triton kernel for one operation, benchmarked vs PyTorch native
 - [ ] **Publish with comparison report as interactive HTML**
 
+## Month 3 Project B: "TokenScope — Tokenizer Analyzer & Comparison Tool"
+**What:** A tool that takes any text and shows how different tokenizers (GPT-2, LLaMA, Mistral, tiktoken) split it, with efficiency metrics, custom Triton kernel for fast tokenization stats, and insights on why some models handle certain languages better.
+**Novelty:** Visual side-by-side comparison of 4+ tokenizers on the same text + a "tokenization efficiency score" per language/domain. Nobody has a unified comparison tool.
+**Skills used:** BPE tokenization (Month 1), Triton kernels (Month 3), custom CUDA extensions (Month 3), Flash Attention understanding (Month 3), LLM fine-tuning (Month 3)
+**Deliverables:**
+- [ ] Side-by-side tokenization of 4+ tokenizers on same input
+- [ ] Efficiency metrics: tokens per word, vocab coverage, compression ratio
+- [ ] Language analysis: which tokenizer handles Hindi, code, math best?
+- [ ] Custom Triton kernel for batch tokenization stats (GPU-accelerated)
+- [ ] Web UI showing colored token boundaries on input text
+- [ ] **Publish to GitHub**
+
 ---
 
-## Month 4 Project: "QuantBench — The Quantization Analyzer"
+## Month 4 Project A: "QuantBench — The Quantization Analyzer"
 **What:** A tool that takes ANY HuggingFace model and quantizes it across multiple methods, then generates a comprehensive quality-vs-speed report.
 **Novelty:** Nobody has a **single tool** that runs GPTQ, AWQ, GGUF, and FP8 on the same model and generates a unified comparison dashboard. You're building the definitive quantization benchmark tool.
 **Deliverables:**
@@ -102,9 +138,21 @@
 - [ ] CLI tool: `quantbench --model meta-llama/Llama-3-8B --methods gptq,awq,gguf`
 - [ ] **Publish as pip-installable package**
 
+## Month 4 Project B: "LLM-Speedometer — Real-Time Inference Profiler"
+**What:** A middleware that wraps any LLM serving endpoint (vLLM, TensorRT-LLM, local) and shows real-time: tokens/sec, TTFT, TPOT, GPU utilization, KV-cache usage, and identifies the bottleneck (compute vs memory vs network).
+**Novelty:** Not just static benchmarks — LIVE profiling during actual conversations. Shows a real-time dashboard that updates as you chat. Identifies "your model is 73% memory-bound, quantizing to INT4 would give 3.2x speedup."
+**Skills used:** Quantization (Month 4), inference serving (Month 4), CUDA profiling (Month 2), memory bandwidth analysis (Month 1), KV-cache (Month 4)
+**Deliverables:**
+- [ ] Middleware: wraps any OpenAI-compatible endpoint
+- [ ] Real-time dashboard: tok/s, TTFT, TPOT, GPU util, KV-cache occupancy
+- [ ] Bottleneck identification: "memory-bound: quantize" or "compute-bound: batch more"
+- [ ] Recommendation engine: suggests optimization based on profiling data
+- [ ] Historical tracking: plot performance over time
+- [ ] **Publish to GitHub with demo GIF**
+
 ---
 
-## Month 5 Project: "DeepRAG — Production RAG with NVIDIA Stack"
+## Month 5 Project A: "DeepRAG — Production RAG with NVIDIA Stack"
 **What:** End-to-end RAG system that can ingest any document type and answer questions with source citations, using NVIDIA tools throughout.
 **Novelty:** **RAG strategy auto-selector** — the system automatically decides whether to use naive retrieval, hybrid retrieval, graph RAG, or agentic RAG based on question complexity. Includes a built-in evaluation pipeline that scores every response.
 **Deliverables:**
@@ -119,9 +167,21 @@
 - [ ] NIM for LLM inference backend
 - [ ] **Publish with Docker Compose for one-command deployment**
 
+## Month 5 Project B: "DocuMind — AI Research Assistant"
+**What:** An AI assistant that ingests your entire paper/document library, builds a knowledge graph, and answers complex research questions by reasoning across multiple documents with citations.
+**Novelty:** Not just RAG — it builds **cross-document reasoning chains**. "Paper A proposes method X, Paper B shows it fails on Y, Paper C fixes it with Z" — synthesized from 3 different documents automatically.
+**Skills used:** RAG (Month 5), Graph RAG (Month 5), agents (Month 5), NVIDIA NIM (Month 5), quantization (Month 4), all CUDA fundamentals
+**Deliverables:**
+- [ ] Ingest 50+ research papers (PDF → parse → chunk → embed)
+- [ ] Knowledge graph: entities (methods, datasets, results) + relationships
+- [ ] Cross-document reasoning: answer questions requiring info from multiple papers
+- [ ] Citation generation: every claim linked to source paper + page
+- [ ] "Research gap finder": identify what hasn't been tried yet
+- [ ] **Publish to GitHub with demo on real AI papers**
+
 ---
 
-## Month 6 Project: "AgentForge — Multi-Agent AI Platform" ⭐ (MILESTONE PROJECT)
+## Month 6 Project A: "AgentForge — Multi-Agent AI Platform" ⭐ (MILESTONE PROJECT)
 **What:** A platform where you can define AI agents with different roles, tools, and memory, and they collaborate to complete complex tasks.
 **Novelty:** **Agent performance profiler** — tracks every LLM call, tool use, reasoning step, and generates a visual trace showing exactly how agents collaborated (or failed), with cost tracking per agent. Nobody builds agents with this level of observability.
 **Deliverables:**
@@ -136,9 +196,22 @@
 - [ ] Evaluate on 3 real tasks: research report, code debugging, data analysis
 - [ ] **Publish with demo video and live hosted demo**
 
+## Month 6 Project B: "LLM-Arena — Model Comparison Battleground"
+**What:** A self-hosted Chatbot Arena clone where you can load 2+ LLMs, ask them the same questions, vote on which is better, and generate an ELO leaderboard with statistical analysis.
+**Novelty:** Includes **automatic evaluation** alongside human voting — runs LLM-as-judge, computes agreement rate between human and AI judge, and shows "your judgment aligns with GPT-4's 78% of the time."
+**Skills used:** Agents (Month 6), RLHF/DPO understanding (Month 6), RAG (Month 5), serving (Month 4), quantization (Month 4), all prior
+**Deliverables:**
+- [ ] Load any 2+ models (HuggingFace, GGUF, NIM endpoint)
+- [ ] Side-by-side comparison UI: same prompt → both models answer → user votes
+- [ ] ELO rating system with confidence intervals
+- [ ] Automatic LLM-as-judge evaluation running in parallel
+- [ ] Human vs AI judge agreement analysis
+- [ ] Category breakdown: coding, math, reasoning, creative, safety
+- [ ] **Publish with web UI + demo**
+
 ---
 
-## Month 7 Project: "VisionChat — Multi-Modal AI Assistant"
+## Month 7 Project A: "VisionChat — Multi-Modal AI Assistant"
 **What:** An AI assistant that understands text, images, documents, and audio.
 **Novelty:** **Modality router** — automatically detects input type and routes to the right model pipeline. Most multi-modal demos are hardcoded for one input type. Yours handles mixed inputs in a single conversation.
 **Deliverables:**
@@ -150,9 +223,20 @@
 - [ ] Modality router with confidence scores
 - [ ] **Publish with web UI (Gradio/Streamlit)**
 
+## Month 7 Project B: "GPU-Accelerated PDF Intelligence"
+**What:** A pipeline that takes any PDF (research papers, financial reports, technical docs) and extracts ALL content — text, tables, charts, images, equations — using GPU-accelerated processing, then makes it searchable and question-answerable.
+**Novelty:** Most PDF tools lose tables and charts. Yours extracts tables as structured data, interprets charts as data, reads equations as LaTeX, and stores everything in a multimodal RAG index.
+**Skills used:** Multi-modal (Month 7), RAG (Month 5), NVIDIA DALI (Month 7), vision models (Month 7), all prior
+**Deliverables:**
+- [ ] PDF → extract text (OCR for scanned), tables (structured), charts (interpreted), equations (LaTeX)
+- [ ] GPU-accelerated: DALI for image processing, NIM VLM for chart interpretation
+- [ ] Multimodal RAG: query text, tables, and images with natural language
+- [ ] "Explain this chart" feature: point to a chart, get a text explanation
+- [ ] **Publish to GitHub**
+
 ---
 
-## Month 8 Project: "MoE-Lab — Mixture of Experts Playground"
+## Month 8 Project A: "MoE-Lab — Mixture of Experts Playground"
 **What:** Train and analyze Mixture of Experts models at small scale, with tools to visualize expert specialization.
 **Novelty:** **Expert specialization visualizer** — shows WHAT each expert learned (which types of tokens/topics activate which experts). Nobody provides this level of MoE interpretability.
 **Deliverables:**
@@ -164,9 +248,20 @@
 - [ ] Interactive visualization dashboard
 - [ ] **Publish with analysis report as blog post**
 
+## Month 8 Project B: "ArchSearch — Neural Architecture Comparator"
+**What:** A tool that lets you define any Transformer variant (dense, MoE, SSM hybrid, different attention patterns) at small scale, trains each on the same data, and generates a comprehensive comparison.
+**Novelty:** One-command architecture comparison. "Is MoE 8x7B better than dense 7B for code? For math? For multilingual?" with hard data, not vibes.
+**Skills used:** MoE (Month 8), Transformer variants (Month 8), Mamba/SSM (prior), training (Month 2-3), profiling (Month 2), all prior
+**Deliverables:**
+- [ ] Define architectures in YAML: dense, MoE, hybrid attention+SSM
+- [ ] Auto-train each at matched compute budget
+- [ ] Comparison dashboard: loss curves, per-domain accuracy, throughput, memory
+- [ ] "Architecture recommendation" given constraints (memory, speed, task type)
+- [ ] **Publish with blog post comparing 5+ architectures**
+
 ---
 
-## Month 9 Project: "KernelSmith — Custom Triton Kernel Library for LLMs"
+## Month 9 Project A: "KernelSmith — Custom Triton Kernel Library for LLMs"
 **What:** A library of hand-optimized Triton kernels that speed up LLM training and inference, as a drop-in replacement for PyTorch operations.
 **Novelty:** **Automatic performance regression testing** — CI pipeline that benchmarks every kernel against PyTorch native on multiple GPU architectures and shows speedup/regression in a dashboard. This is how real NVIDIA engineers work.
 **Deliverables:**
@@ -180,9 +275,20 @@
 - [ ] Integration: drop-in replacement for `nn.Module` subclasses
 - [ ] **Publish as pip-installable library with CI benchmarks**
 
+## Month 9 Project B: "PyTorch-to-Triton Auto-Converter"
+**What:** A tool that takes a PyTorch `nn.Module` and automatically generates a fused Triton kernel for its forward pass, benchmarks it, and shows the speedup.
+**Novelty:** Automatic kernel fusion — you give it a sequence of PyTorch ops (LayerNorm → dropout → linear → GELU), it generates ONE fused Triton kernel. Like a mini torch.compile but transparent and educational.
+**Skills used:** Triton (Month 9), torch.compile understanding (Month 9), CUDA kernels (Month 1-4), profiling (Month 2), all prior
+**Deliverables:**
+- [ ] Input: any `nn.Module` with element-wise + normalization ops
+- [ ] Output: fused Triton kernel + benchmark vs unfused PyTorch
+- [ ] Support: RMSNorm+residual, GELU+linear, SiLU+multiply (LLM patterns)
+- [ ] Show generated Triton code (educational: see what fusion looks like)
+- [ ] **Publish to GitHub as pip-installable tool**
+
 ---
 
-## Month 10 Project: "TrainScale — Distributed LLM Training Framework"
+## Month 10 Project A: "TrainScale — Distributed LLM Training Framework"
 **What:** A simplified but functional distributed training framework that supports data parallelism + tensor parallelism.
 **Novelty:** **Training cost estimator** — given a model config, dataset size, and GPU type, predicts training time, cost, and optimal parallelism strategy BEFORE you start training. Nobody has a good open-source tool for this.
 **Deliverables:**
@@ -195,9 +301,20 @@
 - [ ] Checkpointing with resume support
 - [ ] **Publish with calculator web tool**
 
+## Month 10 Project B: "TrainWatch — Distributed Training Debugger"
+**What:** A real-time monitoring tool for distributed training that shows per-GPU utilization, communication overhead, gradient norms per layer, and automatically detects training issues (loss spikes, dead layers, communication bottlenecks).
+**Novelty:** Existing tools (wandb, tensorboard) show loss curves. Yours shows HARDWARE-level training health: "GPU 3 is 20% slower because NVLink bandwidth is saturated" or "Layer 15 has exploding gradients."
+**Skills used:** Distributed training (Month 10), NCCL (Month 3), profiling (Month 2), all CUDA fundamentals, all prior
+**Deliverables:**
+- [ ] Real-time per-GPU dashboard: SM util, memory, communication time
+- [ ] Per-layer gradient norm tracking with anomaly detection
+- [ ] Communication profiler: AllReduce time vs compute time per step
+- [ ] Auto-diagnose: "training unstable at step 4500 — gradient spike in layer 22"
+- [ ] **Publish to GitHub**
+
 ---
 
-## Month 11 Project: "PaperBot — AI Research Paper Implementer"
+## Month 11 Project A: "PaperBot — AI Research Paper Implementer"
 **What:** An AI agent that takes an arxiv paper URL, reads it, explains it, and generates a working implementation skeleton.
 **Novelty:** Goes beyond summarization — actually **extracts the algorithm, generates pseudocode, then generates runnable PyTorch code** for the key contribution. Uses multiple agent steps: parse → understand → plan → implement → verify.
 **Deliverables:**
@@ -209,9 +326,21 @@
 - [ ] Test on 5 recent papers from different areas (attention, training, inference, alignment, agents)
 - [ ] **Publish with demo on 10 implemented papers**
 
+## Month 11 Project B: "Paper2Benchmark — Auto-Generate Evaluations from Papers"
+**What:** Given an AI paper, automatically extract the claimed results, generate a benchmark script, and verify whether an open-source model achieves the reported numbers.
+**Novelty:** "Does LLaMA-3 actually score 79.2% on MMLU as the paper claims?" — auto-run the evaluation and compare. A reproducibility verification tool.
+**Skills used:** Paper reading (Month 11), agents (Month 6), evaluation (Month 10), RAG (Month 5), all prior
+**Deliverables:**
+- [ ] Parse paper → extract claimed benchmark scores
+- [ ] Auto-generate evaluation script using lm-evaluation-harness
+- [ ] Run evaluation on specified model
+- [ ] Compare: "Paper claims 79.2%, we measured 78.8% (within margin ✓)"
+- [ ] Reproducibility report with confidence intervals
+- [ ] **Publish to GitHub**
+
 ---
 
-## Month 12 Project: "ReasonEngine — Test-Time Compute for Better Answers"
+## Month 12 Project A: "ReasonEngine — Test-Time Compute for Better Answers"
 **What:** A system that makes any LLM dramatically smarter at hard problems by spending more compute at inference time.
 **Novelty:** **Adaptive compute budget** — automatically detects question difficulty and allocates compute accordingly. Easy question = 1 pass. Hard math = 64 samples + MCTS + verification. Nobody has a clean, open-source adaptive test-time compute system.
 **Deliverables:**
@@ -223,9 +352,21 @@
 - [ ] Cost tracking: show $/question for each difficulty level
 - [ ] **Publish with interactive demo**
 
+## Month 12 Project B: "ThinkTrace — Reasoning Chain Visualizer"
+**What:** A tool that takes any reasoning model's output (CoT, ToT, MCTS) and visualizes the reasoning TREE — showing which paths were explored, which were pruned, where the model backtracked, and the final answer path highlighted.
+**Novelty:** Reasoning is a black box. Your tool makes it visible. See the tree of thoughts, the dead ends, the winning path — all in an interactive graph.
+**Skills used:** Reasoning/MCTS (Month 12), process reward models (Month 12), agents (Month 6), all prior
+**Deliverables:**
+- [ ] Capture reasoning traces from CoT, ToT, MCTS, best-of-N
+- [ ] Interactive tree visualization (D3.js or similar)
+- [ ] Color-coded paths: green (selected), red (pruned), yellow (explored)
+- [ ] Per-step scores from process reward model
+- [ ] Compare reasoning strategies visually on the same problem
+- [ ] **Publish to GitHub with demo**
+
 ---
 
-## Month 13 Project: "NVServe — Production LLM Serving Platform"
+## Month 13 Project A: "NVServe — Production LLM Serving Platform"
 **What:** A production-grade LLM serving platform built on the NVIDIA stack, with everything you'd need to run LLMs in a real company.
 **Novelty:** **Unified dashboard** that shows everything in one place: model performance, cost per query, safety violations, user satisfaction, A/B test results. Most serving setups have monitoring scattered across 5 tools.
 **Deliverables:**
@@ -238,9 +379,21 @@
 - [ ] API key management and rate limiting
 - [ ] **Publish with Kubernetes Helm chart for one-command deployment**
 
+## Month 13 Project B: "CostGuard — LLM Cost Optimizer"
+**What:** A proxy that sits between your app and any LLM API, automatically routing queries to the cheapest model that can handle the complexity, with semantic caching, prompt compression, and cost tracking.
+**Novelty:** Automatic cost optimization. "This query is simple → route to Llama-8B ($0.0001). This needs reasoning → route to GPT-4 ($0.01)." Saves 60-80% on API costs.
+**Skills used:** Production serving (Month 13), model routing (Month 13), agents (Month 6), RAG (Month 5), quantization (Month 4), all prior
+**Deliverables:**
+- [ ] Proxy server: OpenAI-compatible input, routes to cheapest capable model
+- [ ] Difficulty classifier: routes easy/medium/hard queries to appropriate model
+- [ ] Semantic cache: reuse answers for similar queries (embedding similarity)
+- [ ] Prompt compression: shorten prompts without losing meaning
+- [ ] Cost dashboard: $/day, $/query, savings vs single-model baseline
+- [ ] **Publish to GitHub**
+
 ---
 
-## Month 14 Project: "SynthData — GPU-Accelerated Synthetic Data Factory"
+## Month 14 Project A: "SynthData — GPU-Accelerated Synthetic Data Factory"
 **What:** A pipeline that generates high-quality synthetic training data for any domain, using LLMs + NVIDIA tools.
 **Novelty:** **Quality-aware generation loop** — generates data, scores quality with a trained classifier, filters bad examples, and iteratively improves. Uses NeMo Curator for GPU-accelerated deduplication and filtering. Not just "call GPT-4 and save outputs."
 **Deliverables:**
@@ -252,9 +405,21 @@
 - [ ] End-to-end: generate data → filter → train model → evaluate improvement
 - [ ] **Publish with comparison: model trained on synthetic vs human data**
 
+## Month 14 Project B: "DataScope — Training Data Quality Analyzer"
+**What:** A tool that analyzes any text dataset and generates a quality report: deduplication rate, language distribution, toxicity score, domain balance, contamination check (is benchmark data leaked?), and recommends optimal data mix.
+**Novelty:** "Your dataset is 40% duplicate, 12% low-quality, and contains 3% MMLU test questions (contaminated!)" — nobody has a one-command data quality audit tool.
+**Skills used:** Synthetic data (Month 14), NeMo Curator (Month 14), embeddings (Month 5), GPU-accelerated processing (Month 1+), all prior
+**Deliverables:**
+- [ ] Input: any text dataset (jsonl, parquet, HuggingFace dataset)
+- [ ] Dedup analysis: exact + near-duplicate detection (MinHash on GPU)
+- [ ] Quality scoring: perplexity-based + classifier-based quality filters
+- [ ] Contamination check: compare against major benchmarks (MMLU, GSM8K, HumanEval)
+- [ ] HTML quality report with visualizations
+- [ ] **Publish to GitHub**
+
 ---
 
-## Month 15 Project: "AgentX — Enterprise AI Agent with Full NVIDIA Stack"
+## Month 15 Project A: "AgentX — Enterprise AI Agent with Full NVIDIA Stack"
 **What:** The definitive enterprise AI agent that uses every relevant NVIDIA tool.
 **Novelty:** **Agent capability benchmark** — includes a test suite that measures your agent's capabilities across 10 dimensions (reasoning, tool use, retrieval, safety, multi-step, etc.) and generates a radar chart. Build the agent AND the evaluation.
 **Deliverables:**
@@ -269,9 +434,21 @@
 - [ ] Radar chart visualization of agent capabilities
 - [ ] **Publish with live demo + benchmark results**
 
+## Month 15 Project B: "AgentEval — Automated Agent Testing Framework"
+**What:** A framework that automatically generates test scenarios for AI agents, runs them, grades performance across 10 dimensions, and identifies failure modes.
+**Novelty:** Agents are hard to test because tasks are open-ended. Your tool generates test cases from templates ("book a flight" → 50 variations) and grades each execution automatically.
+**Skills used:** Enterprise agents (Month 15), full NVIDIA stack (Month 15), evaluation (Month 10), all 14 months of prior skills
+**Deliverables:**
+- [ ] Test case generator: templates → diverse scenarios (easy/medium/hard)
+- [ ] Auto-grader: checks task completion, tool use correctness, safety
+- [ ] 10-dimension scoring: reasoning, retrieval, safety, efficiency, cost, etc.
+- [ ] Failure mode analysis: "agent fails 80% of multi-step math tasks"
+- [ ] Regression testing: compare agent v1 vs v2 across all test cases
+- [ ] **Publish to GitHub**
+
 ---
 
-## Month 16 Project: "OpenContrib — Major Open-Source Contribution"
+## Month 16 Project A: "OpenContrib — Major Open-Source Contribution"
 **What:** Make a meaningful contribution to a major AI open-source project.
 **Novelty:** This IS the novelty — you're contributing to real tools used by thousands of people.
 **Deliverables:**
@@ -319,26 +496,24 @@
 
 ### Monthly Project Tracker (2 projects per month)
 
-> **Project A** = structured (listed below). **Project B** = your own novel idea using current + all previous month skills.
-
-| Month | Project A (Structured) | Status | Project B (Your Novel Idea) | Status |
-|-------|------------------------|--------|-----------------------------|--------|
-| 1 | GPU Matrix Math Engine | ⬜ | *(your idea, must use CUDA + math)* | ⬜ |
-| 2 | nanoLLM — GPT from Scratch | ⬜ | *(must use CUDA + Transformer + profiling)* | ⬜ |
-| 3 | LLM Surgery — Fine-Tuning Toolkit | ⬜ | *(must use CUDA + LLM + fine-tuning + Triton)* | ⬜ |
-| 4 | QuantBench — Quantization Analyzer | ⬜ | *(must use quant + serving + CUDA kernels)* | ⬜ |
-| 5 | DeepRAG — Production RAG + NVIDIA | ⬜ | *(must use RAG + agents + NVIDIA tools + all prior)* | ⬜ |
-| 6 | AgentForge — Multi-Agent Platform ⭐ | ⬜ | *(must use agents + RLHF + reasoning + all prior)* | ⬜ |
-| 7 | VisionChat — Multi-Modal Assistant | ⬜ | *(must use multi-modal + all prior skills)* | ⬜ |
-| 8 | MoE-Lab — Expert Specialization | ⬜ | *(must use MoE + kernels + all prior)* | ⬜ |
-| 9 | KernelSmith — Triton Kernel Library | ⬜ | *(must use Triton + compiler + all prior)* | ⬜ |
-| 10 | TrainScale — Distributed Training | ⬜ | *(must use distributed + eval + all prior)* | ⬜ |
-| 11 | PaperBot — Paper Implementer | ⬜ | *(must use paper impl + all prior)* | ⬜ |
-| 12 | ReasonEngine — Adaptive Test-Time Compute | ⬜ | *(must use reasoning + all prior)* | ⬜ |
-| 13 | NVServe — Production Serving Platform | ⬜ | *(must use production + NVIDIA + all prior)* | ⬜ |
-| 14 | SynthData — Synthetic Data Factory | ⬜ | *(must use data + training + all prior)* | ⬜ |
-| 15 | AgentX — Enterprise Agent (Full NVIDIA) | ⬜ | *(must use full NVIDIA stack + all prior)* | ⬜ |
-| 16 | OpenContrib — Open Source Contribution | ⬜ | *(must contribute to 2nd project)* | ⬜ |
+| Month | Project A | ✓ | Project B | ✓ |
+|-------|-----------|---|-----------|---|
+| 1 | GPU Matrix Math Engine | ⬜ | LLM Inference Cost Simulator | ⬜ |
+| 2 | nanoLLM — GPT from Scratch | ⬜ | Attention Visualizer | ⬜ |
+| 3 | LLM Surgery — Fine-Tuning Toolkit | ⬜ | TokenScope — Tokenizer Analyzer | ⬜ |
+| 4 | QuantBench — Quantization Analyzer | ⬜ | LLM-Speedometer — Inference Profiler | ⬜ |
+| 5 | DeepRAG — Production RAG | ⬜ | DocuMind — Research Assistant | ⬜ |
+| 6 | AgentForge — Multi-Agent Platform ⭐ | ⬜ | LLM-Arena — Model Battleground | ⬜ |
+| 7 | VisionChat — Multi-Modal Assistant | ⬜ | GPU-Accelerated PDF Intelligence | ⬜ |
+| 8 | MoE-Lab — Expert Specialization | ⬜ | ArchSearch — Architecture Comparator | ⬜ |
+| 9 | KernelSmith — Triton Kernel Library | ⬜ | PyTorch-to-Triton Auto-Converter | ⬜ |
+| 10 | TrainScale — Distributed Training | ⬜ | TrainWatch — Training Debugger | ⬜ |
+| 11 | PaperBot — Paper Implementer | ⬜ | Paper2Benchmark — Reproducibility Tool | ⬜ |
+| 12 | ReasonEngine — Test-Time Compute | ⬜ | ThinkTrace — Reasoning Visualizer | ⬜ |
+| 13 | NVServe — Production Serving | ⬜ | CostGuard — LLM Cost Optimizer | ⬜ |
+| 14 | SynthData — Synthetic Data Factory | ⬜ | DataScope — Data Quality Analyzer | ⬜ |
+| 15 | AgentX — Enterprise Agent (NVIDIA) | ⬜ | AgentEval — Agent Testing Framework | ⬜ |
+| 16 | OpenContrib — Open Source | ⬜ | *(contribute to 2nd OSS project)* | ⬜ |
 | 17-18 | Magnum Opus — Signature Project | ⬜ | *(your masterpiece)* | ⬜ |
 
 ---
@@ -830,6 +1005,16 @@
 
 ---
 
+## 🔄 Buffer Week (Month 1 Revision)
+- [ ] Revise all CUDA concepts: kernels, memory hierarchy, coalescing, warps, SMs
+- [ ] Revise all ML concepts: MLP, backprop, softmax, cross-entropy, activation functions
+- [ ] Re-run your best CUDA kernels, try to optimize further
+- [ ] **Build Monthly Project A:** GPU Matrix Math Engine
+- [ ] **Build Monthly Project B:** LLM Inference Cost Simulator
+- [ ] Push both projects to GitHub
+
+---
+
 ## Week 5 : The Transformer — Attention Is All You Need
 
 ### Day 1 — Scaled Dot-Product Attention
@@ -1039,6 +1224,17 @@
 
 ### 📄 Sunday Paper
 - [ ] Skim: "Efficient Processing of Deep Neural Networks" (Sze et al., 2020) — hardware chapter
+
+---
+
+## 🔄 Buffer Week (Month 2 Revision)
+- [ ] Revise Transformer architecture: attention, multi-head, positional encoding, FFN
+- [ ] Revise GPU libraries: cuBLAS, Tensor Cores, Nsight profiling
+- [ ] Revise LLaMA architecture: RMSNorm, RoPE, SwiGLU, GQA
+- [ ] Re-read your GPT-2 implementation, understand every line
+- [ ] **Build Monthly Project A:** nanoLLM — GPT from Scratch
+- [ ] **Build Monthly Project B:** Attention Visualizer
+- [ ] Push both projects to GitHub
 
 ---
 
@@ -1255,6 +1451,17 @@
 
 ---
 
+## 🔄 Buffer Week (Month 3 Revision)
+- [ ] Revise distributed: DDP, ZeRO, tensor parallelism, NCCL
+- [ ] Revise post-training: SFT, DPO, chat templates
+- [ ] Revise Flash Attention algorithm and Triton programming
+- [ ] Re-read custom CUDA extensions code
+- [ ] **Build Monthly Project A:** LLM Surgery — Fine-Tuning & Alignment Toolkit
+- [ ] **Build Monthly Project B:** TokenScope — Tokenizer Analyzer
+- [ ] Push both projects to GitHub
+
+---
+
 ## Week 13 : LoRA & Parameter-Efficient Fine-Tuning
 
 ### Day 1 — KV-Cache Implementation
@@ -1440,6 +1647,17 @@
 ### 📄 Sunday Papers
 - [ ] "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks" (Lewis, 2020)
 - [ ] "Lost in the Middle: How Language Models Use Long Contexts" (Liu, 2023)
+
+---
+
+## 🔄 Buffer Week (Month 4 Revision)
+- [ ] Revise LoRA/QLoRA: math, implementation, merging strategies
+- [ ] Revise quantization: GPTQ, AWQ, GGUF, FP8, INT4 CUDA kernels
+- [ ] Revise inference serving: TensorRT-LLM, vLLM, PagedAttention, speculative decoding
+- [ ] Revise RAG: chunking, hybrid retrieval, re-ranking, evaluation
+- [ ] **Build Monthly Project A:** QuantBench — Quantization Analyzer
+- [ ] **Build Monthly Project B:** LLM-Speedometer — Inference Profiler
+- [ ] Push both projects to GitHub
 
 ---
 
@@ -1678,6 +1896,17 @@
 
 ---
 
+## 🔄 Buffer Week (Month 5 Revision)
+- [ ] Revise advanced RAG: agentic, graph, multi-modal
+- [ ] Revise agents: ReAct, tool use, memory, multi-agent, orchestration
+- [ ] Revise full NVIDIA stack: NIM, NeMo, Guardrails, Retriever, Riva, ACE
+- [ ] Re-run your best agent, try to improve it
+- [ ] **Build Monthly Project A:** DeepRAG — Production RAG
+- [ ] **Build Monthly Project B:** DocuMind — Research Assistant
+- [ ] Push both projects to GitHub
+
+---
+
 ## Week 21-22 : Knowledge Distillation & Model Merging
 
 ### Week 21 Topics
@@ -1792,6 +2021,16 @@
 - [ ] Can implement chain-of-thought and reasoning techniques
 - [ ] Can read and understand most AI papers
 - [ ] **Have 14+ impressive projects in portfolio**
+
+## 🔄 Buffer Week (Month 6 Revision) ⭐ 6-MONTH MILESTONE
+- [ ] Revise RLHF pipeline: RL basics, PPO, GRPO, reward models
+- [ ] Revise reasoning: CoT, ToT, self-consistency, STaR
+- [ ] Revise long context: RoPE scaling, Flash Attention, Mamba/SSM
+- [ ] Revise distillation, model merging, synthetic data
+- [ ] **Build Monthly Project A:** AgentForge — Multi-Agent Platform
+- [ ] **Build Monthly Project B:** LLM-Arena — Model Battleground
+- [ ] Push both projects to GitHub
+- [ ] **Write a "6-month retrospective" blog post summarizing your journey**
 
 ---
 
@@ -2466,4 +2705,4 @@
 *Current week: Week 2*
 *Weeks completed: Week 1 ✅*
 *Total items completed: ~35 / ~1270*
-*Monthly projects completed: 0 / 34*
+*Monthly projects completed: 0 / 34 (17 Project A + 17 Project B)*
