@@ -1318,26 +1318,192 @@ A Transformer with 32 layers has a computation graph like:
 
 ## 5.3 Key Autograd Patterns
 
+### PATTERN 1: `torch.no_grad()` — Skip gradient tracking
+
 ```python
-# PATTERN 1: torch.no_grad() — skip gradient tracking (inference)
 with torch.no_grad():
     output = model(input)  # faster, uses less memory
-# Use during: inference, evaluation, anything that doesn't need gradients
+```
 
-# PATTERN 2: .detach() — stop gradient flow
+```
+WHAT IT DOES:
+  Normally, PyTorch tracks EVERY operation to build the computation graph
+  (so it can do backward() later). This tracking costs:
+    - Extra memory (stores intermediate values for backward pass)
+    - Extra time (bookkeeping for every operation)
+  
+  torch.no_grad() says: "I DON'T need gradients. Skip the tracking."
+
+WHEN TO USE:
+  ✅ Inference (generating text with a trained model)
+  ✅ Evaluation (testing accuracy on validation set)
+  ✅ Any time you're NOT training
+  
+  ❌ NEVER use during training (you need gradients for backward!)
+
+WHY IT MATTERS FOR LLMs:
+  During inference, a 7B model stores NO activation memory.
+  During training, it stores 10-50+ GB of activations for backward.
+  torch.no_grad() is why inference uses ~13 GB (just weights)
+  but training uses ~60-100 GB (weights + activations + gradients + optimizer).
+
+REAL EXAMPLE — you already used it in the MNIST code:
+  model.eval()
+  with torch.no_grad():          # ← no gradient tracking
+      for images, labels in test_loader:
+          outputs = model(images)  # forward only, no graph building
+          # ... compute accuracy
+  # This is ~2x faster and uses ~3x less memory than with gradients
+```
+
+### PATTERN 2: `.detach()` — Stop gradient flow at a specific point
+
+```python
 hidden = encoder(x)
 hidden_detached = hidden.detach()  # gradient won't flow back through encoder
 output = decoder(hidden_detached)
+```
 
-# PATTERN 3: optimizer.zero_grad() — MUST call before each backward
-# Without it, gradients ACCUMULATE across iterations (usually a bug)
+```
+WHAT IT DOES:
+  Creates a copy of the tensor that is DISCONNECTED from the computation graph.
+  Backward pass stops here — gradients don't flow further back.
+
+  Without detach:
+    x → encoder → hidden → decoder → output → loss
+    backward: loss → decoder → hidden → encoder → x
+    (encoder gets gradients and updates)
+
+  With detach:
+    x → encoder → hidden ✂️ hidden_detached → decoder → output → loss
+    backward: loss → decoder → hidden_detached → STOPS
+    (encoder gets NO gradients — frozen)
+
+WHEN TO USE:
+  ✅ Freezing part of a model (only train the decoder, keep encoder fixed)
+  ✅ Preventing gradient flow in specific paths
+  ✅ Creating targets that shouldn't affect training
+  
+WHY IT MATTERS FOR LLMs:
+  1. RLHF: The "reference model" is a detached copy of the base model.
+     When computing KL penalty, you don't want gradients flowing through 
+     the reference model — only through the model being trained.
+  
+  2. DPO: The reference model logits are detached.
+  
+  3. Knowledge distillation: Teacher model outputs are detached.
+     Student learns from them but teacher doesn't change.
+  
+  4. Contrastive learning (embedding models): Sometimes you detach
+     one branch of the pair to prevent collapse.
+```
+
+### PATTERN 3: `optimizer.zero_grad()` — Clear old gradients
+
+```python
 optimizer.zero_grad()   # clear old gradients
 loss.backward()          # compute new gradients
 optimizer.step()         # update weights
+```
 
-# PATTERN 4: .item() — get a Python number from a 0-dim tensor
+```
+WHAT IT DOES:
+  PyTorch ACCUMULATES gradients by default. If you call backward() twice
+  without zeroing, the gradients ADD UP:
+  
+    backward() #1: grad = 0.5
+    backward() #2: grad = 0.5 + 0.3 = 0.8  ← ACCUMULATED!
+  
+  Usually this is a BUG. You want fresh gradients each step.
+  zero_grad() resets all gradients to 0 before computing new ones.
+
+THE ORDER MATTERS — always this sequence:
+  1. optimizer.zero_grad()   ← clear old gradients
+  2. loss.backward()          ← compute new gradients
+  3. optimizer.step()         ← use gradients to update weights
+
+  If you forget zero_grad():
+    Step 1: gradient = 0.5, update works correctly
+    Step 2: gradient = 0.5 + 0.3 = 0.8, update is WRONG (too big!)
+    Step 3: gradient = 0.8 + 0.2 = 1.0, even worse
+    Training becomes unstable and diverges.
+
+WHEN ACCUMULATION IS INTENTIONAL — Gradient Accumulation:
+  Sometimes you WANT to accumulate across mini-batches to simulate
+  a larger batch size:
+  
+    for i, batch in enumerate(loader):
+        loss = model(batch) / accumulation_steps
+        loss.backward()                           # accumulate
+        if (i + 1) % accumulation_steps == 0:
+            optimizer.step()                       # update
+            optimizer.zero_grad()                  # NOW clear
+  
+  This is how LLMs train with "effective batch size 4096" on GPUs
+  that can only fit batch size 8. Accumulate 512 steps → same as batch 4096.
+  You'll use this technique starting Month 2.
+```
+
+### PATTERN 4: `.item()` — Get a Python number from a tensor
+
+```python
 loss_value = loss.item()  # converts tensor(0.342) → float 0.342
-# Use for logging/printing (doesn't track gradients)
+print(f"Loss: {loss_value:.4f}")
+```
+
+```
+WHAT IT DOES:
+  loss is a PyTorch tensor: tensor(0.342, grad_fn=<NllLossBackward>)
+  loss.item() extracts just the number: 0.342 (a plain Python float)
+
+WHY NOT JUST USE loss DIRECTLY?
+  Using the tensor directly in Python operations keeps the computation
+  graph alive, wastes GPU memory, and can cause memory leaks.
+  
+  BAD:
+    all_losses = []
+    for epoch in range(100):
+        loss = criterion(output, target)
+        all_losses.append(loss)      # ← stores ENTIRE graph for each loss!
+        # After 100 epochs: 100 computation graphs in memory = OOM!
+  
+  GOOD:
+    all_losses = []
+    for epoch in range(100):
+        loss = criterion(output, target)
+        all_losses.append(loss.item())  # ← stores just the number (8 bytes)
+        # 100 floats in memory = 800 bytes. Fine!
+
+WHEN TO USE:
+  ✅ Printing loss values
+  ✅ Logging to wandb/tensorboard  
+  ✅ Storing loss history
+  ✅ Any time you need the NUMBER, not the tensor
+  
+  ❌ Don't use BEFORE backward() — you need the tensor for backward!
+  
+  Correct order:
+    loss = criterion(output, target)
+    loss.backward()                     # ← needs the tensor
+    print(f"Loss: {loss.item():.4f}")   # ← now safe to extract number
+```
+
+### Summary: When to Use Each Pattern
+
+```
+PATTERN              WHEN                          LLM EXAMPLE
+─────────────────────────────────────────────────────────────────────
+torch.no_grad()      Inference / evaluation        ChatGPT generating text
+                     NOT training                   (no gradients needed)
+
+.detach()            Freeze part of model           RLHF reference model,
+                     Stop gradient at a point       knowledge distillation teacher
+
+zero_grad()          Every training step            EVERY training step, always
+                     Before backward()              (forget = training explodes)
+
+.item()              Logging/printing               print(f"Loss: {loss.item()}")
+                     Storing numbers                wandb.log({"loss": loss.item()})
 ```
 
 ---
