@@ -1,8 +1,9 @@
 # LLM + CUDA + Hardware Mastery Tracker
 
 > **Daily: 2-3 hours** | **Saturday: 3-4 hrs project** | **Sunday: 1-2 hrs papers (optional)**
-> **Start:** March 31, 2025 | **End:** ~September 2026 (18 months)
-> **6-month milestone:** Impressive projects, solid understanding, building real things
+> **Duration:** ~18 months | **6-month milestone:** Impressive projects, solid understanding
+> **After each month:** 1 week revision buffer to revisit weak areas + complete monthly projects
+> **Projects:** 1 weekly project + **2 monthly projects** (novel, cumulative, portfolio-grade)
 
 ---
 
@@ -14,6 +15,8 @@
 - **Saturday** = weekly project (bigger coding session)
 - **Sunday** = rest + optionally read the listed paper
 - If a day takes longer, split it across 2 days — no rush
+- **After every month:** take 1 extra week to revise everything from that month + previous months
+- **Monthly projects:** complete 2 per month — each must use skills from current AND previous months
 - **Use AI (Cursor/Claude)** as your tutor, code reviewer, and paper explainer throughout
 
 ---
@@ -35,11 +38,14 @@
 # MONTHLY CAPSTONE PROJECTS (Portfolio-Grade, Novel, Useful)
 # ═══════════════════════════════════════════════════════════
 
-> These are **end-of-month projects** that combine everything you learned that month
-> into ONE impressive, portfolio-worthy project. Each has a **novelty angle** —
-> something that isn't just a tutorial copy-paste but demonstrates real understanding.
-> Spend the **last Saturday + Sunday of each month** on these (or spread across the last week).
+> **TWO projects per month.** Each must combine skills from the current month AND
+> all previous months. Each must have a **novelty angle** — something that isn't
+> just a tutorial copy-paste but demonstrates real understanding and creativity.
+> Build during the **revision week** at the end of each month.
 > These are the projects you put on your resume and GitHub.
+>
+> **Rule:** Project A = the one listed below (structured). Project B = YOUR idea
+> (must use current + previous month skills, must be novel). Come up with Project B yourself.
 
 ---
 
@@ -311,27 +317,29 @@
 
 ---
 
-### Monthly Project Tracker
+### Monthly Project Tracker (2 projects per month)
 
-| Month | Project | Status | GitHub Link |
-|-------|---------|--------|-------------|
-| 1 | GPU Matrix Math Engine | ⬜ | |
-| 2 | nanoLLM — GPT from Scratch | ⬜ | |
-| 3 | LLM Surgery — Fine-Tuning Toolkit | ⬜ | |
-| 4 | QuantBench — Quantization Analyzer | ⬜ | |
-| 5 | DeepRAG — Production RAG + NVIDIA | ⬜ | |
-| 6 | AgentForge — Multi-Agent Platform ⭐ | ⬜ | |
-| 7 | VisionChat — Multi-Modal Assistant | ⬜ | |
-| 8 | MoE-Lab — Expert Specialization | ⬜ | |
-| 9 | KernelSmith — Triton Kernel Library | ⬜ | |
-| 10 | TrainScale — Distributed Training | ⬜ | |
-| 11 | PaperBot — Paper Implementer | ⬜ | |
-| 12 | ReasonEngine — Adaptive Test-Time Compute | ⬜ | |
-| 13 | NVServe — Production Serving Platform | ⬜ | |
-| 14 | SynthData — Synthetic Data Factory | ⬜ | |
-| 15 | AgentX — Enterprise Agent (Full NVIDIA) | ⬜ | |
-| 16 | OpenContrib — Open Source Contribution | ⬜ | |
-| 17-18 | Magnum Opus — Signature Project | ⬜ | |
+> **Project A** = structured (listed below). **Project B** = your own novel idea using current + all previous month skills.
+
+| Month | Project A (Structured) | Status | Project B (Your Novel Idea) | Status |
+|-------|------------------------|--------|-----------------------------|--------|
+| 1 | GPU Matrix Math Engine | ⬜ | *(your idea, must use CUDA + math)* | ⬜ |
+| 2 | nanoLLM — GPT from Scratch | ⬜ | *(must use CUDA + Transformer + profiling)* | ⬜ |
+| 3 | LLM Surgery — Fine-Tuning Toolkit | ⬜ | *(must use CUDA + LLM + fine-tuning + Triton)* | ⬜ |
+| 4 | QuantBench — Quantization Analyzer | ⬜ | *(must use quant + serving + CUDA kernels)* | ⬜ |
+| 5 | DeepRAG — Production RAG + NVIDIA | ⬜ | *(must use RAG + agents + NVIDIA tools + all prior)* | ⬜ |
+| 6 | AgentForge — Multi-Agent Platform ⭐ | ⬜ | *(must use agents + RLHF + reasoning + all prior)* | ⬜ |
+| 7 | VisionChat — Multi-Modal Assistant | ⬜ | *(must use multi-modal + all prior skills)* | ⬜ |
+| 8 | MoE-Lab — Expert Specialization | ⬜ | *(must use MoE + kernels + all prior)* | ⬜ |
+| 9 | KernelSmith — Triton Kernel Library | ⬜ | *(must use Triton + compiler + all prior)* | ⬜ |
+| 10 | TrainScale — Distributed Training | ⬜ | *(must use distributed + eval + all prior)* | ⬜ |
+| 11 | PaperBot — Paper Implementer | ⬜ | *(must use paper impl + all prior)* | ⬜ |
+| 12 | ReasonEngine — Adaptive Test-Time Compute | ⬜ | *(must use reasoning + all prior)* | ⬜ |
+| 13 | NVServe — Production Serving Platform | ⬜ | *(must use production + NVIDIA + all prior)* | ⬜ |
+| 14 | SynthData — Synthetic Data Factory | ⬜ | *(must use data + training + all prior)* | ⬜ |
+| 15 | AgentX — Enterprise Agent (Full NVIDIA) | ⬜ | *(must use full NVIDIA stack + all prior)* | ⬜ |
+| 16 | OpenContrib — Open Source Contribution | ⬜ | *(must contribute to 2nd project)* | ⬜ |
+| 17-18 | Magnum Opus — Signature Project | ⬜ | *(your masterpiece)* | ⬜ |
 
 ---
 
@@ -618,48 +626,48 @@
 
 ---
 
-## Week 1 (Mar 31 - Apr 6): CPU vs GPU & Math Foundations
+## Week 1: CPU vs GPU & Math Foundations ✅ COMPLETED
 
-### Day 1 — CPU vs GPU Architecture ✅ COMPLETED
+### Day 1 — CPU vs GPU Architecture ✅
 - [x] Von Neumann architecture: fetch-decode-execute cycle
 - [x] CPU: few powerful cores, large caches, branch prediction, out-of-order execution
 - [x] GPU: thousands of simple cores, SIMT (Single Instruction Multiple Thread)
 - [x] Throughput vs latency oriented design — why GPUs win at parallel workloads
 - [x] ALU ratio: GPU ~80% ALUs vs CPU ~5%
-- [ ] **Code:** Write CPU matrix multiply in C, measure FLOPS *(do after landing)*
+- [x] **Code:** Write CPU matrix multiply, measure FLOPS
 
-### Day 2 — NVIDIA GPU Physical Architecture
-- [ ] Streaming Multiprocessor (SM) internals: CUDA cores, Tensor Cores, SFUs, Load/Store units
-- [ ] Warp schedulers: how 2-4 schedulers issue instructions per cycle
-- [ ] Register file: 65536 32-bit registers per SM
-- [ ] L1 cache / Shared memory (configurable split)
-- [ ] L2 cache, memory controllers, HBM2/HBM3 interface
-- [ ] NVIDIA GPU lineage: Tesla → Fermi → Kepler → Maxwell → Pascal → Volta → Turing → Ampere → Hopper → Blackwell
-- [ ] **Explore:** NGC Catalog (catalog.ngc.nvidia.com) — browse containers, models, resources
-- [ ] **Code:** `cudaGetDeviceProperties()` — query and understand every field
+### Day 2 — NVIDIA GPU Physical Architecture ✅
+- [x] Streaming Multiprocessor (SM) internals: CUDA cores, Tensor Cores, SFUs, Load/Store units
+- [x] Warp schedulers: how 2-4 schedulers issue instructions per cycle
+- [x] Register file: 65536 32-bit registers per SM
+- [x] L1 cache / Shared memory (configurable split)
+- [x] L2 cache, memory controllers, HBM2/HBM3 interface
+- [x] NVIDIA GPU lineage: Tesla → Fermi → Kepler → Maxwell → Pascal → Volta → Turing → Ampere → Hopper → Blackwell
+- [x] **Explore:** NGC Catalog (catalog.ngc.nvidia.com) — browse containers, models, resources
+- [x] **Code:** `cudaGetDeviceProperties()` — query and understand every field
 
-### Day 3 — Math Foundations for Deep Learning
-- [ ] Linear algebra: vectors, matrices, matrix multiplication, transpose, inverse
-- [ ] Eigenvalues/eigenvectors intuition
-- [ ] Probability: Bayes theorem, Gaussian, Bernoulli, Categorical distributions
-- [ ] Information theory: entropy, cross-entropy, KL divergence
-- [ ] Calculus: partial derivatives, chain rule, Jacobian, gradient
-- [ ] **Code:** Implement matrix multiply, softmax, cross-entropy loss in NumPy
+### Day 3 — Math Foundations for Deep Learning ✅
+- [x] Linear algebra: vectors, matrices, matrix multiplication, transpose, inverse
+- [x] Eigenvalues/eigenvectors intuition
+- [x] Probability: Bayes theorem, Gaussian, Bernoulli, Categorical distributions
+- [x] Information theory: entropy, cross-entropy, KL divergence
+- [x] Calculus: partial derivatives, chain rule, Jacobian, gradient
+- [x] **Code:** Implement matrix multiply, softmax, cross-entropy loss in NumPy
 
-### Day 4 — CUDA Programming Model
-- [ ] Host (CPU) vs Device (GPU) code
-- [ ] Kernel launch: `kernel<<<grid, block>>>(args)`
-- [ ] Thread hierarchy: Thread → Warp (32) → Block → Grid
-- [ ] `threadIdx`, `blockIdx`, `blockDim`, `gridDim`
-- [ ] 1D, 2D, 3D thread configurations
-- [ ] nvcc compilation: PTX → SASS
-- [ ] **Code:** "Hello World" kernel + vector addition with error checking
+### Day 4 — CUDA Programming Model ✅
+- [x] Host (CPU) vs Device (GPU) code
+- [x] Kernel launch: `kernel<<<grid, block>>>(args)`
+- [x] Thread hierarchy: Thread → Warp (32) → Block → Grid
+- [x] `threadIdx`, `blockIdx`, `blockDim`, `gridDim`
+- [x] 1D, 2D, 3D thread configurations
+- [x] nvcc compilation: PTX → SASS
+- [x] **Code:** "Hello World" kernel + vector addition with error checking
 
-### Day 5 — Neural Networks from First Principles
-- [ ] Perceptron: weighted sum + activation = decision boundary
-- [ ] Multi-layer perceptron (MLP), universal approximation theorem
-- [ ] Activation functions: Sigmoid, tanh, ReLU, GELU, SiLU/Swish — what each does and WHY
-- [ ] **Code:** Implement 2-layer MLP from scratch in NumPy (forward + backward manually)
+### Day 5 — Neural Networks from First Principles ✅
+- [x] Perceptron: weighted sum + activation = decision boundary
+- [x] Multi-layer perceptron (MLP), universal approximation theorem
+- [x] Activation functions: Sigmoid, tanh, ReLU, GELU, SiLU/Swish — what each does and WHY
+- [x] **Code:** Implement 2-layer MLP from scratch in NumPy (forward + backward manually)
 
 ### 🔨 Saturday Project
 - [ ] **CUDA Vector Math Library** — add, subtract, multiply, dot product on GPU
@@ -673,7 +681,7 @@
 
 ---
 
-## Week 2 (Apr 7 - Apr 13): CUDA Memory & Backpropagation
+## Week 2 : CUDA Memory & Backpropagation
 
 ### Day 1 — CUDA Memory Model: Global Memory
 - [ ] Global memory: off-chip HBM, high bandwidth, high latency (400-600 cycles)
@@ -724,7 +732,7 @@
 
 ---
 
-## Week 3 (Apr 14 - Apr 20): Warp Execution & Training Neural Networks
+## Week 3 : Warp Execution & Training Neural Networks
 
 ### Day 1 — Warp Execution Model
 - [ ] Warps: 32 threads executing in lockstep (SIMT)
@@ -772,7 +780,7 @@
 
 ---
 
-## Week 4 (Apr 21 - Apr 27): CUDA Streams & Sequence Models
+## Week 4 : CUDA Streams & Sequence Models
 
 ### Day 1 — CUDA Streams & Events
 - [ ] Default stream (stream 0): all operations serialized
@@ -822,7 +830,7 @@
 
 ---
 
-## Week 5 (Apr 28 - May 4): The Transformer — Attention Is All You Need
+## Week 5 : The Transformer — Attention Is All You Need
 
 ### Day 1 — Scaled Dot-Product Attention
 - [ ] Why replace RNNs: parallelization, long-range dependencies
@@ -872,7 +880,7 @@
 
 ---
 
-## Week 6 (May 5 - May 11): cuBLAS, cuDNN, Tensor Cores
+## Week 6 : cuBLAS, cuDNN, Tensor Cores
 
 ### Day 1 — cuBLAS
 - [ ] BLAS levels: L1 (vec-vec), L2 (mat-vec), L3 (mat-mat)
@@ -925,7 +933,7 @@
 
 ---
 
-## Week 7 (May 12 - May 18): Profiling & Modern LLM Architectures
+## Week 7 : Profiling & Modern LLM Architectures
 
 ### Day 1 — Nsight Systems
 - [ ] Timeline view: CPU + GPU activity, memory transfers, kernel launches
@@ -975,7 +983,7 @@
 
 ---
 
-## Week 8 (May 19 - May 25): GPU Memory Deep Dive & Data Pipelines
+## Week 8 : GPU Memory Deep Dive & Data Pipelines
 
 ### Day 1 — GPU Memory Architecture
 - [ ] HBM2 vs HBM2e vs HBM3: bandwidth, capacity, stack architecture
@@ -1034,7 +1042,7 @@
 
 ---
 
-## Week 9 (May 26 - Jun 1): Distributed CUDA & Pre-training Concepts
+## Week 9 : Distributed CUDA & Pre-training Concepts
 
 ### Day 1 — NCCL & Data Parallelism
 - [ ] NCCL: AllReduce, AllGather, ReduceScatter, Broadcast
@@ -1084,7 +1092,7 @@
 
 ---
 
-## Week 10 (Jun 2 - Jun 8): Custom CUDA for PyTorch & Instruction Following
+## Week 10 : Custom CUDA for PyTorch & Instruction Following
 
 ### Day 1 — CUTLASS & TensorRT Basics
 - [ ] CUTLASS: template library for GEMM, maps to GPU hierarchy
@@ -1132,7 +1140,7 @@
 
 ---
 
-## Week 11 (Jun 9 - Jun 15): Flash Attention & Triton
+## Week 11 : Flash Attention & Triton
 
 ### Day 1 — Flash Attention Theory
 - [ ] Standard attention: O(N²) memory for attention matrix
@@ -1177,7 +1185,7 @@
 
 ---
 
-## Week 12 (Jun 16 - Jun 22): Tokenizer Mastery & Multi-Modal Overview
+## Week 12 : Tokenizer Mastery & Multi-Modal Overview
 
 ### Day 1 — Tokenizer Deep Dive
 - [ ] BPE algorithm implementation details
@@ -1247,7 +1255,7 @@
 
 ---
 
-## Week 13 (Jun 23 - Jun 29): LoRA & Parameter-Efficient Fine-Tuning
+## Week 13 : LoRA & Parameter-Efficient Fine-Tuning
 
 ### Day 1 — KV-Cache Implementation
 - [ ] Why KV-cache: avoid recomputing past key-value pairs
@@ -1295,7 +1303,7 @@
 
 ---
 
-## Week 14 (Jun 30 - Jul 6): Quantization Deep Dive
+## Week 14 : Quantization Deep Dive
 
 ### Day 1 — Quantization Fundamentals
 - [ ] Number formats: FP32, FP16, BF16, FP8 (E4M3/E5M2), INT8, INT4
@@ -1340,7 +1348,7 @@
 
 ---
 
-## Week 15 (Jul 7 - Jul 13): Inference Serving
+## Week 15 : Inference Serving
 
 ### Day 1 — Inference Performance Analysis
 - [ ] Prefill (compute-bound) vs Decode (memory-bandwidth-bound)
@@ -1385,7 +1393,7 @@
 
 ---
 
-## Week 16 (Jul 14 - Jul 20): RAG Foundations
+## Week 16 : RAG Foundations
 
 ### Day 1 — Vector Search & Embeddings
 - [ ] Cosine similarity, L2 distance, inner product
@@ -1435,7 +1443,7 @@
 
 ---
 
-## Week 17 (Jul 21 - Jul 27): Advanced RAG
+## Week 17 : Advanced RAG
 
 ### Day 1 — Agentic RAG & Self-RAG
 - [ ] RAG as a tool: LLM decides when/how to retrieve
@@ -1479,7 +1487,7 @@
 
 ---
 
-## Week 18 (Jul 28 - Aug 3): AI Agents — Foundations
+## Week 18 : AI Agents — Foundations
 
 ### Day 1 — Tool Use & Function Calling
 - [ ] Function calling: LLMs generating structured tool calls
@@ -1524,7 +1532,7 @@
 
 ---
 
-## Week 19 (Aug 4 - Aug 10): AI Agents — Advanced
+## Week 19 : AI Agents — Advanced
 
 ### Day 1 — Code-Executing & Browser-Using Agents
 - [ ] Sandboxed execution: Docker, E2B
@@ -1566,7 +1574,7 @@
 
 ---
 
-## Week 20 (Aug 11 - Aug 17): NVIDIA AI Ecosystem — Part 1
+## Week 20 : NVIDIA AI Ecosystem — Part 1
 
 ### Day 1 — NVIDIA NGC & build.nvidia.com
 - [ ] NGC (NVIDIA GPU Cloud): GPU-optimized container registry
@@ -1621,7 +1629,7 @@
 
 ---
 
-## Week 20.5 (Aug 18 - Aug 24): NVIDIA AI Ecosystem — Part 2
+## Week 20.5 : NVIDIA AI Ecosystem — Part 2
 
 ### Day 1 — NVIDIA AI Workbench & AI Enterprise
 - [ ] AI Workbench: unified dev environment for AI projects
@@ -1670,7 +1678,7 @@
 
 ---
 
-## Week 21-22 (Aug 18 - Aug 31): Knowledge Distillation & Model Merging
+## Week 21-22 : Knowledge Distillation & Model Merging
 
 ### Week 21 Topics
 - [ ] Teacher-student paradigm, soft targets, KD loss
@@ -1695,7 +1703,7 @@
 
 ---
 
-## Week 23-24 (Sep 1 - Sep 14): RL Foundations, RLHF & Reasoning
+## Week 23-24 : RL Foundations, RLHF & Reasoning
 
 ### Week 23 — RL Foundations + RLHF Pipeline
 
@@ -1743,7 +1751,7 @@
 
 ---
 
-## Week 25-26 (Sep 15 - Sep 28): Long Context & Efficient Architectures
+## Week 25-26 : Long Context & Efficient Architectures
 
 ### Week 25 — Long Context
 - [ ] RoPE scaling: linear, NTK-aware, YaRN, Dynamic NTK, ABF
@@ -1794,7 +1802,7 @@
 
 ---
 
-## Week 27-28 (Sep 29 - Oct 12): Vision-Language & Multi-Modal AI
+## Week 27-28 : Vision-Language & Multi-Modal AI
 
 ### Topics
 - [ ] CLIP: contrastive learning, image encoder + text encoder
@@ -1821,7 +1829,7 @@
 
 ---
 
-## Week 28.5 (Oct 6 - Oct 12): Diffusion Models & Generative AI Overview
+## Week 28.5 : Diffusion Models & Generative AI Overview
 
 > You don't need to be a diffusion expert for LLMs, but you need to understand how
 > image/video generation works because multi-modal AI is converging and NVIDIA serves
@@ -1861,7 +1869,7 @@
 
 ---
 
-## Week 29-30 (Oct 13 - Oct 26): MoE & Advanced Architectures
+## Week 29-30 : MoE & Advanced Architectures
 
 ### Topics
 - [ ] MoE implementation: expert parallelism, load balancing on GPU
@@ -1886,7 +1894,7 @@
 
 ---
 
-## Week 31-32 (Oct 27 - Nov 9): Compiler & Kernel Optimization
+## Week 31-32 : Compiler & Kernel Optimization
 
 ### Topics
 - [ ] Triton compiler internals
@@ -1912,7 +1920,7 @@
 
 ---
 
-## Week 33-34 (Nov 10 - Nov 23): Training Infrastructure
+## Week 33-34 : Training Infrastructure
 
 ### Topics
 - [ ] Megatron-LM: 3D parallelism (DP + TP + PP), sequence parallelism, context parallelism
@@ -1937,7 +1945,7 @@
 
 ---
 
-## Week 35-36 (Nov 24 - Dec 7): Evaluation & Benchmarking
+## Week 35-36 : Evaluation & Benchmarking
 
 ### Topics
 - [ ] lm-evaluation-harness, HELM, OpenCompass
@@ -1964,7 +1972,7 @@
 
 ---
 
-## Week 37-38 (Dec 8 - Dec 21): Production Systems
+## Week 37-38 : Production Systems
 
 ### Topics
 - [ ] Load balancing, auto-scaling for GPU inference
@@ -1991,7 +1999,7 @@
 
 ---
 
-## Week 39-40 (Dec 22 - Jan 4): Synthetic Data & Structured Generation
+## Week 39-40 : Synthetic Data & Structured Generation
 
 ### Topics
 - [ ] Data quality assessment: perplexity filtering, dedup, classifier quality
@@ -2039,7 +2047,7 @@
 
 ---
 
-## Week 41-42 (Jan 5 - Jan 18): Reading & Implementing Papers
+## Week 41-42 : Reading & Implementing Papers
 
 ### How to Read AI Papers
 - [ ] Master the technique: Title/Abstract → Figures/Tables → Intro → Method → Experiments → Related Work
@@ -2057,7 +2065,7 @@
 
 ---
 
-## Week 43-44 (Jan 19 - Feb 1): Test-Time Compute & Reasoning Scaling
+## Week 43-44 : Test-Time Compute & Reasoning Scaling
 
 ### Topics
 - [ ] Test-time compute scaling: more inference compute → better answers
@@ -2083,7 +2091,7 @@
 
 ---
 
-## Week 45-46 (Feb 2 - Feb 15): Enterprise AI Agents with NVIDIA
+## Week 45-46 : Enterprise AI Agents with NVIDIA
 
 ### Topics
 - [ ] NVIDIA ACE (Avatar Cloud Engine): AI-powered digital humans
@@ -2113,7 +2121,7 @@
 
 ---
 
-## Week 47-48 (Feb 16 - Mar 1): Advanced Fine-Tuning & Alignment
+## Week 47-48 : Advanced Fine-Tuning & Alignment
 
 ### Topics
 - [ ] SPIN: self-play fine-tuning
@@ -2135,7 +2143,7 @@
 
 ---
 
-## Week 49-50 (Mar 2 - Mar 15): Advanced RAG & Information Retrieval
+## Week 49-50 : Advanced RAG & Information Retrieval
 
 ### Topics
 - [ ] ColBERT, ColBERTv2: late interaction models
@@ -2162,7 +2170,7 @@
 
 ---
 
-## Week 51-52 (Mar 16 - Mar 29): Phase 4 Capstone
+## Week 51-52 : Phase 4 Capstone
 
 ### Topics
 - [ ] Review everything from Phase 4
@@ -2192,7 +2200,7 @@
 
 ---
 
-## Week 53-56 (Mar 30 - Apr 26): Capstone Project
+## Week 53-56 : Capstone Project
 
 ### Choose ONE:
 
@@ -2232,7 +2240,7 @@
 
 ---
 
-## Week 57-60 (Apr 27 - May 24): Cutting Edge Research
+## Week 57-60 : Cutting Edge Research
 
 ### Topics (explore based on latest papers)
 - [ ] Latest architecture innovations (check arxiv)
@@ -2248,7 +2256,7 @@
 
 ---
 
-## Week 61-65 (May 25 - Jun 28): Open Source & Community
+## Week 61-65 : Open Source & Community
 
 ### Activities
 - [ ] Contribute meaningful PRs to 2-3 open-source projects
@@ -2455,6 +2463,7 @@
 
 ---
 
-*Last updated: March 13, 2026*
-*Current week: Week 1*
-*Total items completed: 5 / ~1270*
+*Current week: Week 2*
+*Weeks completed: Week 1 ✅*
+*Total items completed: ~35 / ~1270*
+*Monthly projects completed: 0 / 34*
