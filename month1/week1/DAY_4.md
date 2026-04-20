@@ -371,6 +371,281 @@ Compile and run:
 !nvcc vec_add.cu -o vec_add && ./vec_add
 ```
 
+### Understanding Vector Addition — Line by Line
+
+**Header files:**
+```c
+#include <stdio.h>     // for printf
+#include <stdlib.h>    // for malloc, free, rand
+#include <time.h>      // for timing (not strictly needed here)
+```
+
+**The GPU kernel:**
+```c
+__global__ void vec_add_kernel(float *A, float *B, float *C, int N) {
+```
+```
+__global__     = "this function runs on GPU, callable from CPU"
+void           = returns nothing (kernels always return void)
+float *A,*B,*C = pointers to arrays in GPU memory (HBM)
+int N          = array size (so threads know the bounds)
+
+Notice: kernel gets DEVICE pointers (d_A, d_B, d_C).
+It can ONLY access GPU memory. CPU memory is invisible to it.
+```
+
+```c
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+```
+```
+THE most important formula. Assigns each thread a unique global ID:
+
+  blockIdx.x    = which block am I in? (0, 1, 2, ..., 3906)
+  blockDim.x    = how many threads per block? (256)
+  threadIdx.x   = which thread within my block? (0, 1, 2, ..., 255)
+
+Examples:
+  Block 0, Thread 5:    i = 0×256 + 5   = 5      → handles A[5], B[5], C[5]
+  Block 10, Thread 100: i = 10×256 + 100 = 2660   → handles A[2660], B[2660], C[2660]
+  Block 3906, Thread 64: i = 3906×256 + 64 = 1,000,000
+
+Every one of the ~1 million threads gets a unique i.
+```
+
+```c
+    if (i < N) {
+        C[i] = A[i] + B[i];
+    }
+```
+```
+BOUNDS CHECK — critical!
+
+Why? We launched 3907 blocks × 256 threads = 1,000,192 threads.
+But the array has only 1,000,000 elements.
+Threads with i = 1,000,000 to 1,000,191 would access INVALID memory!
+
+Without this check: segfault / CUDA error / data corruption.
+
+Inside the if: the actual work.
+  C[i] = A[i] + B[i]
+  "Read element i from A, read element i from B, add them, write to C[i]"
+  
+  This happens SIMULTANEOUSLY on ~1 million threads.
+  One big parallel computation.
+```
+
+**The main() function — the CPU workflow:**
+
+```c
+int N = 1000000;                      // 1 million elements
+size_t bytes = N * sizeof(float);     // 1M × 4 bytes = 4,000,000 bytes = 4 MB
+```
+
+**STEP 1: Allocate CPU memory (RAM)**
+```c
+float *h_A = (float*)malloc(bytes);   // h_ = host (CPU RAM)
+float *h_B = (float*)malloc(bytes);
+float *h_C = (float*)malloc(bytes);
+```
+```
+malloc() = standard C function to request memory
+(float*) = type cast: tell C "treat this as array of floats"
+bytes    = how much memory (4 MB)
+
+h_ prefix = Host (CPU) — coding convention to track where data lives
+d_ prefix = Device (GPU)
+  Without this convention, you'll mix up CPU and GPU pointers
+  and get cryptic errors.
+
+After this: 3 arrays of 1M floats each, sitting in CPU RAM.
+Contents: uninitialized garbage.
+```
+
+```c
+for (int i = 0; i < N; i++) {
+    h_A[i] = (float)rand() / RAND_MAX;   // random value between 0 and 1
+    h_B[i] = (float)rand() / RAND_MAX;
+}
+```
+```
+Fill h_A and h_B with random numbers.
+  rand() returns an int between 0 and RAND_MAX (typically ~2 billion)
+  Dividing converts to a float between 0.0 and 1.0
+
+h_C stays uninitialized — will be overwritten by GPU result.
+```
+
+**STEP 2: Allocate GPU memory (HBM)**
+```c
+float *d_A, *d_B, *d_C;              // d_ = device (GPU HBM)
+cudaMalloc(&d_A, bytes);             // allocate 4 MB on GPU
+cudaMalloc(&d_B, bytes);
+cudaMalloc(&d_C, bytes);
+```
+```
+cudaMalloc() = GPU version of malloc().
+
+Important: it takes a POINTER TO A POINTER (&d_A, not d_A).
+  Why? Because it needs to WRITE the GPU address INTO your pointer variable.
+  In C, to modify a variable from a function, you pass its address.
+
+After this: 12 MB reserved on GPU HBM (3 arrays × 4 MB).
+Contents: garbage. d_A, d_B, d_C now hold GPU memory addresses.
+
+CPU CAN'T read these arrays — they're on a different chip.
+```
+
+**STEP 3: Copy input data CPU → GPU**
+```c
+cudaMemcpy(d_A, h_A, bytes, cudaMemcpyHostToDevice);
+cudaMemcpy(d_B, h_B, bytes, cudaMemcpyHostToDevice);
+```
+```
+cudaMemcpy(destination, source, size, direction)
+  destination = d_A (GPU pointer)
+  source      = h_A (CPU pointer)
+  size        = 4 MB
+  direction   = cudaMemcpyHostToDevice (CPU → GPU)
+
+This is slow! Travels over PCIe bus (~25-32 GB/s).
+4 MB transfer takes ~0.15 ms.
+This is the bottleneck between CPU and GPU — minimize these transfers.
+
+Other directions exist:
+  cudaMemcpyDeviceToHost  → GPU → CPU
+  cudaMemcpyDeviceToDevice → GPU → GPU (much faster, via HBM)
+  cudaMemcpyHostToHost    → CPU → CPU
+```
+
+**STEP 4: Launch kernel**
+```c
+int threads_per_block = 256;
+int blocks = (N + threads_per_block - 1) / threads_per_block;
+```
+```
+threads_per_block = 256 (common choice, must be multiple of 32, max 1024)
+
+blocks = CEILING(N / threads_per_block)
+       = CEILING(1,000,000 / 256)
+       = 3907
+
+The formula (N + tpb - 1) / tpb is C's way of doing ceiling division:
+  Integer division in C truncates:  1000000 / 256 = 3906 (missing 64 elements!)
+  Adding (256-1) before dividing:   1000255 / 256 = 3907 (correct)
+
+Total threads launched: 3907 × 256 = 1,000,192 (192 extra, handled by bounds check)
+```
+
+```c
+vec_add_kernel<<<blocks, threads_per_block>>>(d_A, d_B, d_C, N);
+```
+```
+The kernel launch! Syntax: kernel<<<grid, block>>>(args)
+
+Breaking it down:
+  vec_add_kernel        = name of the GPU function
+  <<<3907, 256>>>       = launch 3907 blocks with 256 threads each
+  (d_A, d_B, d_C, N)    = arguments passed to EVERY thread
+                          (all threads see the same pointers and N)
+
+This IMMEDIATELY returns to CPU (asynchronous!).
+The GPU starts working. The CPU continues to the next line.
+```
+
+```c
+cudaEventRecord(start);
+vec_add_kernel<<<blocks, threads_per_block>>>(d_A, d_B, d_C, N);
+cudaEventRecord(stop);
+cudaEventSynchronize(stop);
+```
+```
+CUDA events are GPU timestamps (more accurate than CPU time for GPU work):
+
+  cudaEventRecord(start)  → mark "start" timestamp on GPU timeline
+  kernel launch            → kernel starts executing
+  cudaEventRecord(stop)   → mark "stop" timestamp (when kernel finishes)
+  cudaEventSynchronize    → CPU waits until stop event is recorded
+
+Why CUDA events instead of time.time()?
+  time.time() on CPU might trigger BEFORE the kernel even starts (launch is async).
+  CUDA events are recorded ON THE GPU, accurate to microseconds.
+
+cudaEventElapsedTime(&ms, start, stop)
+  Calculates milliseconds between start and stop events.
+```
+
+**STEP 5: Copy result GPU → CPU**
+```c
+cudaMemcpy(h_C, d_C, bytes, cudaMemcpyDeviceToHost);
+```
+```
+Bring the result back to CPU so we can verify/print it.
+Direction: cudaMemcpyDeviceToHost (GPU → CPU).
+```
+
+**STEP 6: Verify the result**
+```c
+int errors = 0;
+for (int i = 0; i < N; i++) {
+    if (fabs(h_C[i] - (h_A[i] + h_B[i])) > 1e-5) {
+        errors++;
+    }
+}
+```
+```
+Check: does h_C[i] equal h_A[i] + h_B[i] for every element?
+
+fabs() = absolute value (floating-point)
+1e-5 = tolerance for floating-point rounding errors
+(1e-5 means 0.00001 — float math isn't perfectly exact)
+
+If GPU computed correctly: errors = 0
+If something went wrong: errors > 0 (likely a bug in your kernel)
+
+Always verify your GPU results! Silent errors are the worst kind.
+```
+
+**Bandwidth calculation:**
+```c
+float gb_accessed = 3.0f * N * sizeof(float) / 1e9;  // GB of memory accessed
+float bandwidth = gb_accessed / (milliseconds / 1000.0f);
+```
+```
+For each element, we:
+  Read A[i]: 4 bytes
+  Read B[i]: 4 bytes
+  Write C[i]: 4 bytes
+  Total per element: 12 bytes (3 × 4)
+
+Total memory accessed: 3 × 1,000,000 × 4 bytes = 12 MB = 0.012 GB
+
+Time taken: ~0.042 ms = 0.000042 seconds
+
+Bandwidth: 0.012 GB / 0.000042 s = 286 GB/s
+
+T4 theoretical max: 320 GB/s
+Your achieved: 286 GB/s
+Efficiency: 286 / 320 = 89% of peak bandwidth ← EXCELLENT!
+
+This is memory-bound (no compute, just read + add + write).
+You're close to the GPU's theoretical limit, which means the kernel
+is well-optimized. You can't go faster without changing the algorithm.
+```
+
+**STEP 7: Free memory**
+```c
+cudaFree(d_A); cudaFree(d_B); cudaFree(d_C);   // free GPU memory
+free(h_A); free(h_B); free(h_C);                // free CPU memory
+```
+```
+ALWAYS free your memory. Not freeing = memory leak.
+In CUDA, not freeing GPU memory is worse because GPU memory is limited (16 GB on T4).
+Run a leaky program a few times → GPU out of memory → can't run anything.
+
+Note: cudaFree() for GPU pointers, free() for CPU pointers.
+Mixing them up = crash.
+```
+
 **Expected output:**
 ```
 Launching 3907 blocks × 256 threads = 999936 total threads
@@ -492,6 +767,165 @@ int main() {
 !nvcc mat_fill.cu -o mat_fill && ./mat_fill
 ```
 
+### Understanding 2D Matrix Fill — Line by Line
+
+**The kernel:**
+```c
+__global__ void fill_matrix(float *M, int rows, int cols) {
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+```
+```
+2D version of the thread ID formula. Now we have TWO dimensions:
+
+  col = blockIdx.x * blockDim.x + threadIdx.x   ← X dimension (columns)
+  row = blockIdx.y * blockDim.y + threadIdx.y   ← Y dimension (rows)
+
+Why X for columns and Y for rows? Convention, matches how we think
+visually: X goes right (columns), Y goes down (rows).
+
+Example with block(16,16) and grid(1,1) for a 4×6 matrix:
+  Thread (0,0): col=0, row=0   → handles M[0][0]
+  Thread (5,2): col=5, row=2   → handles M[2][5]
+  Thread (15,15): col=15, row=15 → out of bounds for 4×6 matrix
+```
+
+```c
+    if (row < rows && col < cols) {
+```
+```
+2D bounds check. With 16×16 threads for a 4×6 matrix:
+  We launch 256 threads (16×16) but only 24 are needed (4×6).
+  232 threads (97%!) would access garbage without this check.
+
+Always bounds-check both dimensions.
+```
+
+```c
+        int idx = row * cols + col;
+        M[idx] = row * 100.0f + col;
+    }
+}
+```
+```
+KEY CONCEPT: Matrices are stored as 1D arrays in memory (row-major).
+
+A 4×6 matrix on paper:
+  ┌──────────────────────────┐
+  │   0   1   2   3   4   5  │  ← row 0
+  │ 100 101 102 103 104 105  │  ← row 1
+  │ 200 201 202 203 204 205  │  ← row 2
+  │ 300 301 302 303 304 305  │  ← row 3
+  └──────────────────────────┘
+
+In memory (1D layout):
+  [  0,  1,  2,  3,  4,  5, 100,101,102,103,104,105, 200,...]
+    ↑              ↑                                  ↑
+  row 0         end of row 0                       row 2
+
+Index formula: idx = row * cols + col
+  M[1][3] (row 1, column 3) → idx = 1 * 6 + 3 = 9 → M[9]
+  M[2][5] (row 2, column 5) → idx = 2 * 6 + 5 = 17 → M[17]
+
+Why row * cols (not row * rows)?
+  Each row has `cols` elements.
+  To skip to row `r`, skip `r * cols` elements.
+```
+
+**The main() function — what's NEW vs vector addition:**
+
+```c
+int rows = 4, cols = 6;
+size_t bytes = rows * cols * sizeof(float);   // 24 × 4 = 96 bytes
+```
+
+```c
+float *d_M;
+cudaMalloc(&d_M, bytes);
+```
+```
+Standard CUDA allocation. Note: we allocate a 1D array of 96 bytes,
+even though we THINK of it as a 2D matrix. The 2D structure exists
+only in our code's interpretation (via idx = row * cols + col).
+```
+
+```c
+dim3 block(16, 16);
+```
+```
+dim3 is a CUDA struct with .x, .y, .z fields.
+dim3 block(16, 16) means 16×16 = 256 threads per block.
+(.z defaults to 1 if not specified)
+
+Why 16×16? Common 2D block shape:
+  - 256 threads total (multiple of 32 warp size ✓)
+  - Square shape works well for matrix operations
+  - Fits in shared memory easily
+```
+
+```c
+dim3 grid(
+    (cols + block.x - 1) / block.x,   // ceiling(6/16) = 1 block in x
+    (rows + block.y - 1) / block.y     // ceiling(4/16) = 1 block in y
+);
+```
+```
+Ceiling division in both dimensions:
+  x dim: (6 + 15) / 16 = 21 / 16 = 1   → 1 block covers all 6 columns
+  y dim: (4 + 15) / 16 = 19 / 16 = 1   → 1 block covers all 4 rows
+
+For a larger matrix (say 100×200):
+  x dim: (200 + 15) / 16 = 13 blocks
+  y dim: (100 + 15) / 16 = 7 blocks
+  Grid: 13 × 7 = 91 blocks, each with 256 threads = 23,296 threads
+  (handles 20,000 elements, 3,296 extra threads bounds-checked away)
+```
+
+```c
+fill_matrix<<<grid, block>>>(d_M, rows, cols);
+```
+```
+Kernel launch with 2D grid and 2D block.
+The <<<>>> syntax accepts dim3 structs.
+```
+
+```c
+float h_M[24];                                // CPU array to receive result
+cudaMemcpy(h_M, d_M, bytes, cudaMemcpyDeviceToHost);
+```
+```
+Fixed-size array on stack (since we know 4×6 = 24).
+Copy result back to CPU for printing.
+```
+
+```c
+for (int r = 0; r < rows; r++) {
+    for (int c = 0; c < cols; c++) {
+        printf("%6.0f ", h_M[r * cols + c]);
+    }
+    printf("\n");
+}
+```
+```
+Print the matrix row by row. Uses the same index formula
+to access the 1D array as if it were 2D.
+
+%6.0f = print float with width 6, 0 decimal places
+"\n" = newline after each row
+```
+
+**Why this matters for LLMs:**
+```
+Every matrix in an LLM (W_Q, W_K, W_V, embedding table) is stored
+as a 1D array in memory. CuBLAS, PyTorch, and your future custom
+kernels ALL use this row-major layout (or sometimes column-major).
+
+When you write a custom matmul kernel next week, you'll use:
+  C[row * N + col] = sum over k of A[row * K + k] * B[k * N + col]
+
+Same indexing trick. Just scaled up.
+```
+
 **Expected output:**
 ```
 Matrix (4 × 6):
@@ -549,6 +983,95 @@ CUDA_CHECK(cudaMemcpy(d_A, h_A, bytes,        // check copy
 kernel<<<grid, block>>>(args);
 CUDA_CHECK(cudaGetLastError());                // check launch errors
 CUDA_CHECK(cudaDeviceSynchronize());           // check execution errors
+```
+
+### Understanding CUDA_CHECK — Line by Line
+
+```c
+#define CUDA_CHECK(call)        \
+do {                            \
+    ...                          \
+} while(0)
+```
+```
+#define = C macro (code substitution at compile time)
+CUDA_CHECK(call) = wraps any CUDA call and checks for errors
+
+The "do { ... } while(0)" wrapper is a C idiom:
+  - Makes the macro act like a single statement
+  - Works correctly with if/else without braces
+  - Without it: "if (x) CUDA_CHECK(y); else foo();" could break
+
+The backslashes at end of each line: continue to next line
+  (macros must be on one logical line in C)
+```
+
+```c
+cudaError_t err = call;
+```
+```
+cudaError_t = CUDA's error code type (enum)
+Every CUDA function returns one:
+  cudaSuccess = 0  ← everything's fine
+  cudaErrorOutOfMemory = 2
+  cudaErrorInvalidValue = 11
+  ... many more
+
+'call' is replaced with whatever you pass to the macro:
+  CUDA_CHECK(cudaMalloc(&d_A, bytes))
+  becomes:
+  cudaError_t err = cudaMalloc(&d_A, bytes);
+```
+
+```c
+if (err != cudaSuccess) {
+    printf("CUDA error at %s:%d: %s\n",
+           __FILE__, __LINE__, cudaGetErrorString(err));
+    exit(1);
+}
+```
+```
+If something went wrong, print diagnostic info and quit:
+  __FILE__     = preprocessor macro → current filename (e.g., "vec_add.cu")
+  __LINE__     = preprocessor macro → current line number
+  cudaGetErrorString(err) = converts error code → readable message
+                            "out of memory" instead of "2"
+
+Output example:
+  "CUDA error at vec_add.cu:305: out of memory"
+  
+exit(1) = terminate program with error status 1
+```
+
+**Why two different checks for kernel launches?**
+
+```c
+kernel<<<grid, block>>>(args);
+CUDA_CHECK(cudaGetLastError());        // launch errors
+CUDA_CHECK(cudaDeviceSynchronize());   // execution errors
+```
+```
+Kernel launches don't return an error directly. Two error types:
+
+1. LAUNCH errors: bad configuration
+   - Block size > 1024
+   - Too many shared memory bytes requested
+   - Invalid grid dimensions
+   Detected by: cudaGetLastError()
+   These are caught IMMEDIATELY (before kernel runs).
+
+2. EXECUTION errors: bad runtime behavior
+   - Out-of-bounds memory access
+   - Divide by zero in kernel
+   - Illegal instruction
+   Detected by: cudaDeviceSynchronize()
+   These are caught AFTER kernel finishes.
+
+Without these checks, your kernel can silently corrupt memory
+and you won't know why your results are garbage.
+
+In production code: always wrap CUDA calls in CUDA_CHECK.
+In quick experiments: you can skip it and add when something breaks.
 ```
 
 **Common errors you'll see:**
@@ -1005,6 +1528,254 @@ int main() {
 
 ```python
 !nvcc cuda_ops.cu -o cuda_ops && ./cuda_ops
+```
+
+### Understanding the Mini-Project — Line by Line
+
+This project combines everything from today. Each part is a pattern you'll reuse.
+
+**The 5 element-wise kernels:**
+```c
+__global__ void vec_add(float *A, float *B, float *C, int N) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < N) C[i] = A[i] + B[i];
+}
+```
+```
+Same template for all 5 kernels:
+  1. Compute global thread ID: i = blockIdx.x * blockDim.x + threadIdx.x
+  2. Bounds check: if (i < N)
+  3. Do the operation: C[i] = something involving A[i] and B[i]
+
+Differences between the 5:
+  vec_add:   C[i] = A[i] + B[i]        ← residual connection in LLMs
+  vec_mul:   C[i] = A[i] * B[i]        ← SwiGLU gate × up
+  vec_scale: C[i] = A[i] * s           ← attention scaling by 1/sqrt(d)
+  vec_relu:  C[i] = max(0, A[i])       ← old activation function
+  vec_silu:  C[i] = A[i] / (1+exp(-A[i])) ← LLaMA's activation
+                                         (uses expf() → runs on SFU)
+```
+
+**The naive softmax — and why it's terrible:**
+```c
+__global__ void vec_softmax_naive(float *input, float *output, int N) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i == 0) {          // ← THIS IS THE PROBLEM
+        // ... single thread does ALL the work
+    }
+}
+```
+```
+This is a DELIBERATELY bad implementation to show what NOT to do.
+
+if (i == 0) means only thread 0 runs the code inside.
+All other threads (millions of them!) immediately exit.
+
+Result: 1 thread doing work while the GPU has 2,048+ threads idle.
+This is ~2000x slower than a proper parallel softmax.
+
+The proper way needs parallel reduction (Week 3 topic):
+  - All threads cooperate to find max
+  - All threads cooperate to compute sum of exps
+  - Each thread writes its own output element
+  
+This bad version is kept to demonstrate the value of parallelism.
+```
+
+**The benchmark function — a reusable pattern:**
+```c
+float benchmark_kernel(void (*launcher)(float*, float*, float*, int, int),
+                       float *d_A, float *d_B, float *d_C, int N,
+                       int block_size, int num_runs) {
+```
+```
+This is a GENERIC benchmark that works for ANY kernel.
+
+void (*launcher)(...) = FUNCTION POINTER in C
+  Passes a function as an argument.
+  Lets us benchmark different kernels with the same code.
+
+Why do we need a launcher function instead of passing the kernel directly?
+  Because <<<>>> is special CUDA syntax — can't be used with function pointers.
+  So we wrap each kernel in a small function that we CAN pass as pointer.
+```
+
+```c
+    // Warmup
+    launcher(d_A, d_B, d_C, N, block_size);
+    cudaDeviceSynchronize();
+```
+```
+FIRST kernel launch is ALWAYS slower (JIT compilation, caching).
+We run it once and discard the result → GPU is "warmed up".
+Without warmup, your benchmark numbers are wrong.
+```
+
+```c
+    cudaEventRecord(start);
+    for (int i = 0; i < num_runs; i++) {
+        launcher(d_A, d_B, d_C, N, block_size);
+    }
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    
+    float ms = 0;
+    cudaEventElapsedTime(&ms, start, stop);
+    return ms / num_runs;
+```
+```
+Run kernel 100 times (num_runs), measure total time, divide.
+
+Why 100 times? A single kernel launch might take 0.1 ms.
+Timer resolution might miss that. 100 launches = 10 ms = easily measurable.
+Then average: 10 / 100 = 0.1 ms per launch (accurate!).
+
+This is called "amortizing timer noise" — standard benchmarking practice.
+```
+
+**The launchers — wrapping kernels for function pointers:**
+```c
+void launch_add(float *A, float *B, float *C, int N, int bs) {
+    vec_add<<<(N+bs-1)/bs, bs>>>(A, B, C, N);
+}
+```
+```
+Each launcher takes the same signature: (A, B, C, N, block_size)
+This uniform signature lets us use function pointers.
+
+Inside: just call the kernel with proper launch config.
+vec_scale is special — its 3rd arg is a scalar (2.5f), not a pointer:
+  void launch_scale(...) {
+      vec_scale<<<...>>>(A, 2.5f, C, N);   // 2.5f instead of B
+  }
+```
+
+**The main() — data setup:**
+```c
+int N = 10000000;  // 10 million elements
+size_t bytes = N * sizeof(float);  // 40 MB per array
+
+float *h_A = (float*)malloc(bytes);
+float *h_B = (float*)malloc(bytes);
+for (int i = 0; i < N; i++) {
+    h_A[i] = ((float)rand() / RAND_MAX) * 2.0f - 1.0f;
+    h_B[i] = ((float)rand() / RAND_MAX) * 2.0f - 1.0f;
+}
+```
+```
+10 million elements × 4 bytes = 40 MB per array.
+
+Why this size?
+  - Large enough that bandwidth is measurable (small arrays finish too fast)
+  - Fits easily in 16 GB T4 GPU memory
+  - Similar scale to LLM operations (7B model activations are similar size)
+
+Random values in [-1, 1]:
+  ((float)rand() / RAND_MAX)           → [0, 1]
+  × 2.0f                                → [0, 2]
+  - 1.0f                                → [-1, 1]
+
+Why [-1, 1]? To test ReLU (which kills negatives) and SiLU (needs range).
+```
+
+**The struct array — clever C pattern:**
+```c
+struct { const char *name; void (*fn)(float*,float*,float*,int,int);
+         int rw_arrays; const char *llm_use; } ops[] = {
+    {"Add",   launch_add,   3, "Residual connection"},
+    {"Mul",   launch_mul,   3, "SwiGLU gate × up"},
+    {"Scale", launch_scale, 2, "Attn / sqrt(d_k)"},
+    {"ReLU",  launch_relu,  2, "Activation (older)"},
+    {"SiLU",  launch_silu,  2, "Activation (LLaMA)"},
+};
+```
+```
+This is an array of anonymous structs. Each struct holds:
+  name      = "Add", "Mul", etc. (for display)
+  fn        = function pointer to the launcher
+  rw_arrays = how many arrays it reads/writes (for bandwidth calc)
+              Add reads 2 (A, B) + writes 1 (C) = 3
+              Scale reads 1 (A) + writes 1 (C) = 2
+  llm_use   = description of LLM use case
+
+Why use this pattern?
+  Without it, you'd have 5 separate sections of near-identical benchmark code.
+  With it, one for-loop benchmarks all 5 kernels.
+  This is professional C — data-driven programming.
+```
+
+**The benchmark loop:**
+```c
+for (int i = 0; i < 5; i++) {
+    float ms = benchmark_kernel(ops[i].fn, d_A, d_B, d_C, N, bs, runs);
+    float bw = ops[i].rw_arrays * N * sizeof(float) / (ms/1000.0f) / 1e9;
+    printf("║ %-9s │ %9.3f │ %6.0f GB/s │ %-19s ║\n",
+           ops[i].name, ms, bw, ops[i].llm_use);
+}
+```
+```
+For each of 5 kernels:
+  1. Call benchmark_kernel with that launcher → get ms per launch
+  2. Calculate bandwidth:
+     bytes accessed = rw_arrays × N × 4 bytes
+     bandwidth = bytes / time
+     Convert ms → seconds and bytes → GB
+  3. Print formatted row
+
+The printf format specifiers:
+  %-9s  = string, left-aligned, 9 chars wide
+  %9.3f = float, right-aligned, 9 wide, 3 decimal places
+  %6.0f = float, 6 wide, 0 decimals
+  %-19s = string, left-aligned, 19 chars wide
+
+Result: nicely aligned table with all 5 kernel benchmarks.
+```
+
+**Correctness check:**
+```c
+CUDA_CHECK(cudaMemcpy(h_B, d_C, bytes, cudaMemcpyDeviceToHost));
+int silu_errors = 0;
+for (int i = 0; i < 100; i++) {
+    float expected = h_A[i] / (1.0f + expf(-h_A[i]));
+    if (fabsf(h_B[i] - expected) > 1e-4) silu_errors++;
+}
+```
+```
+Verify the last kernel (SiLU) produced correct results.
+  h_B stores the GPU's SiLU output (we reuse h_B as result buffer)
+  expected = compute SiLU on CPU
+  Compare: if difference > 1e-4, it's an error
+
+Why check only 100 elements? Speed. 10M would take too long on CPU.
+100 samples from random positions gives high confidence.
+
+Why 1e-4 tolerance? Float math on GPU vs CPU can differ slightly
+due to rounding. 1e-4 allows for normal float imprecision but
+catches real bugs.
+```
+
+**Why this project matters:**
+```
+You've built a professional-grade benchmark tool!
+It demonstrates:
+  ✓ Clean kernel structure (5 kernels, same template)
+  ✓ Function pointers for extensibility
+  ✓ Proper warmup + event-based timing
+  ✓ Bandwidth calculation (hardware understanding)
+  ✓ Correctness verification
+  ✓ Error checking with CUDA_CHECK
+  ✓ Data-driven design (struct array)
+
+THE TAKEAWAY from the output:
+  All 5 kernels get ~800-900 GB/s bandwidth.
+  T4 theoretical peak: 320 GB/s actual effective (it says 320 but real is higher due to L2 hits in this workload).
+  
+  They're all memory-bound. The compute (add, multiply, SiLU)
+  is negligibly fast. You're limited by how fast you can read A and B.
+  
+  This is WHY kernel fusion matters — combining multiple operations
+  into one kernel reads/writes memory ONCE instead of multiple times.
+  You'll do fusion with Triton in Week 11.
 ```
 
 **Expected output:**
