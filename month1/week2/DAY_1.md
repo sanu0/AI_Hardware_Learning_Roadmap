@@ -1,466 +1,389 @@
-# Week 2, Day 1: CUDA Global Memory Deep Dive
-## Why Your Kernel Is Fast or Slow — It's Almost Always Memory
-
-Last week you wrote CUDA kernels and saw they hit ~300 GB/s on a T4 (peak ~320).
-Today you learn WHY. You'll understand exactly what happens when a warp reads from
-GPU memory, why coalesced access is 10-32x faster than random access, and you'll
-measure it yourself.
+# Week 2, Day 1: The Story of GPU Memory
+## How HBM, Cache Lines, and Coalescing Decide If Your LLM Runs Fast or Slow
 
 **Time: ~2.5-3 hours**
 **Setup: Google Colab with GPU runtime**
 
 ---
 
-# PART 0: NEW TERMS FOR TODAY
+# PART 1: THE STORY
+
+## 1.1 A Problem That Broke Everything
+
+Imagine it's 2006. NVIDIA has just released CUDA. Researchers are excited — finally,
+they can use thousands of GPU threads for general computing, not just graphics.
+
+A physicist writes a simple program: "multiply each element of a large array by 2."
 
 ```
-GLOBAL MEMORY   = The main GPU memory (HBM). Largest, slowest. 16-80 GB.
-                  Where your weights, KV-cache, activations live.
-
-CACHE LINE      = Minimum unit of data the GPU reads from HBM.
-                  Not 1 byte or 4 bytes — a whole CHUNK of 32 or 128 bytes.
-                  Like how trucks deliver in crates, not individual items.
-
-MEMORY          = A single read/write request to HBM.
-TRANSACTION       Limited to multiples of 32 bytes.
-                  Uncoalesced = many small transactions = slow.
-                  Coalesced = one big transaction = fast.
-
-COALESCED       = When threads in a warp access consecutive memory addresses,
-ACCESS            the GPU combines them into ONE memory transaction.
-                  32 threads × 4 bytes = 128 bytes = 1 transaction. ✓
-
-UNCOALESCED     = Threads access scattered addresses, GPU must issue
-ACCESS            MANY transactions. Can be 2x to 32x slower.
-
-ALIGNED ACCESS  = Memory address is a multiple of the access size.
-                  float access: address divisible by 4.
-                  float4 access: address divisible by 16.
-                  Misaligned = GPU issues extra transactions.
-
-LATENCY         = Time from requesting data to receiving it.
-                  HBM latency: ~400-600 CLOCK CYCLES (~200-300 nanoseconds).
-                  Compare: Register access = 1 cycle.
-
-BANDWIDTH       = Total bytes per second the GPU can move from HBM.
-                  T4: ~320 GB/s theoretical.
-                  A100: ~1,555 GB/s.
-                  H100: ~3,350 GB/s.
-
-HBM             = High Bandwidth Memory. The physical memory chips stacked
-                  next to the GPU die. Connected via hundreds of wires
-                  (not like CPU DDR5 which has ~128 wires).
-
-DDR5            = CPU's main memory type. ~50-100 GB/s bandwidth.
-                  30-50x slower than HBM.
-
-STRIDE          = Distance between consecutive memory accesses.
-                  stride=1: A[0], A[1], A[2] (consecutive, fast)
-                  stride=32: A[0], A[32], A[64] (scattered, slow)
+One CPU thread would take: 1 second
+1000 GPU threads SHOULD take: 1000x less = 1 ms
 ```
+
+He runs it. The GPU takes **100 ms**. 100x faster than CPU — impressive, but
+not 1000x. Where did the other 900x go?
+
+He profiles. The GPU cores are idle **99% of the time**. Why?
+
+**Answer: they're waiting for data.**
+
+The compute was done in 1 ms. The remaining 99 ms was spent **moving numbers
+from memory to the cores**. Even though the GPU had thousands of arithmetic units,
+they were starving.
+
+This is the fundamental problem of GPU computing, and it's the problem every
+optimization in the last 20 years has tried to solve. Today you're going to
+understand WHY this happens, and HOW to fix it.
+
+## 1.2 Why Memory Is The Enemy
+
+Here's the dirty secret of modern hardware:
+
+```
+Compute has been doubling every 2 years (Moore's Law).
+Memory speed has been growing at ~7% per year.
+
+Result — widening gap:
+  1980:   CPU ~1 MFLOP,  RAM ~1 MB/s bandwidth  → ratio = 1
+  2000:   CPU ~1 GFLOP,  RAM ~1 GB/s            → ratio = 1
+  2024:   GPU ~1 TFLOP,  HBM ~3 TB/s            → ratio = 0.3
+
+Wait — GPU ratio LOOKS better. But the GPU also has 10,000+ parallel cores!
+
+Effective ratio for LLMs:
+  H100 compute: 990 TFLOPS (FP16 Tensor Core)
+  H100 memory:  3.35 TB/s
+  FLOP per byte: 990,000 / 3,350 = 295 FLOPs per byte
+  
+  To keep the cores fed, you need to do 295 operations per byte read.
+  Vector add does 1 operation per byte.
+  LLM inference does ~1 operation per byte (read weight, use once).
+  
+  You're compute-capability 300x over what your memory can feed.
+  Cores sit idle 299/300 of the time. THIS is why LLMs are memory-bound.
+```
+
+Intel learned this lesson in the 90s and invented caches. NVIDIA copied the idea
+but had to solve an even harder problem: caches designed for 8 CPU cores don't
+scale to 10,000 GPU threads. They needed something new.
+
+That "something new" is what you're learning today.
+
+## 1.3 The Insight That Made GPUs Viable
+
+In 2008, NVIDIA engineers made a radical choice. Instead of one big cache,
+they designed for **one specific access pattern**:
+
+> "If 32 threads in a warp read 32 consecutive memory addresses,
+> we'll make that one instruction. One transaction. One fetch."
+
+This was the birth of **memory coalescing**. The GPU doesn't track individual
+thread memory requests. Instead, it looks at all 32 requests from a warp,
+groups them by which cache line they fall in, and issues one transaction per line.
+
+If the threads access consecutive addresses (stride 1):
+```
+Thread 0:  A[0]   (byte 0)
+Thread 1:  A[1]   (byte 4)
+Thread 2:  A[2]   (byte 8)
+...
+Thread 31: A[31]  (byte 124)
+
+All within bytes 0-127 = ONE 128-byte cache line = ONE transaction.
+32 threads served in the time of 1 transaction.
+THIS is what makes GPUs fast.
+```
+
+If threads access scattered addresses:
+```
+Thread 0:  A[0]      (byte 0)
+Thread 1:  A[1000]   (byte 4000)
+Thread 2:  A[50000]  (byte 200000)
+...
+
+Each in a different cache line = 32 transactions.
+32x more data fetched than needed.
+Your 2024 H100 suddenly performs like a 2010 GPU.
+```
+
+This single architectural choice — coalescing — is why NVIDIA dominates AI.
+CPUs can't do this because their threads run independently on different cores.
+GPU threads in a warp run IN LOCKSTEP, so the hardware can batch their memory
+requests. That's the superpower.
+
+Today you'll write code that exploits this superpower. And you'll write code that
+violates it, and see the performance crater.
 
 ---
 
-# PART 1: THE GPU MEMORY HIERARCHY (RECAP + EXPANSION)
+# PART 2: THE HARDWARE STORY
 
-You saw this in Day 2 of Week 1. Today we dive into the global memory layer:
+## 2.1 Why HBM Exists
+
+CPU memory (DDR5) is designed for CPUs: few cores, pointer-chasing, latency matters.
+It uses ~128 wires (a "64-bit bus × 2 channels") to connect to the CPU.
+
+Now ask: how do you feed 10,000 GPU cores? Each core wants to read a float per cycle.
+That's 10,000 × 4 bytes × 1.5 GHz = **60 TB/s** of theoretical demand.
+
+DDR5 peaks at ~100 GB/s. You'd need 600 channels. Physically impossible.
+
+The solution came from Hynix in 2013: **High Bandwidth Memory (HBM)**.
 
 ```
-                     ACCESS TIME      SIZE           WHO CAN SEE IT
+HBM innovation: stop trying to make memory chips FASTER.
+Make them WIDER and shorter.
+
+DDR5:   Memory chips on sticks, far from CPU.
+        Long wires → slow, few channels possible.
+        Bandwidth: ~100 GB/s.
+
+HBM:    Memory chips STACKED VERTICALLY next to GPU die.
+        Thousands of TINY wires (TSVs = Through-Silicon Vias).
+        Very short distance → fast.
+        Bandwidth: 3,350 GB/s (H100) — 33x faster than DDR5.
+```
+
+This is why GPU memory is stuck on the card — you CAN'T upgrade GPU RAM like you can
+upgrade DDR5 in your laptop. The HBM chips are physically bonded to the GPU package.
+
+## 2.2 The Cache Hierarchy: Making HBM Bearable
+
+Even at 3.35 TB/s, HBM is **slow** compared to what GPU cores can consume.
+So NVIDIA added multiple layers of caches:
+
+```
+                             ACCESS TIME    SIZE            PURPOSE
 ─────────────────────────────────────────────────────────────────────
-Register            1 cycle          256 KB/SM      Single thread
-                                     (65K × 4 bytes)
-  ↓
-Shared Memory       ~20 cycles       228 KB/SM      All threads in block
-(programmer-         (fast SRAM)
- controlled)
-  ↓
-L1 Cache            ~20 cycles       shared w/ SMEM Single SM
-(hardware cache)
-  ↓
-L2 Cache            ~200 cycles      50 MB          All SMs
-                                     (H100: 50MB)
-                                     (T4: 4MB)
-  ↓
-GLOBAL MEMORY       ~400-600 cycles  16-80 GB       Everyone
-(HBM)               ← TODAY'S FOCUS
+Registers                    1 cycle        256 KB/SM        Thread-local
+  ↓ (spill if too many)
+Shared Memory / L1 Cache     ~20 cycles     228 KB/SM        Block-shared
+  ↓ (if miss)
+L2 Cache                     ~200 cycles    50 MB (H100)     All SMs
+  ↓ (if miss)
+Global Memory (HBM)          ~400-600 cyc   80 GB            Everyone
 ```
 
-**Why global memory dominates everything:**
-```
-Your LLaMA-7B model (13.4 GB of weights) CAN'T fit in:
-  - Registers (256 KB) ❌
-  - Shared memory (228 KB) ❌
-  - L2 cache (50 MB on H100) ❌ — still 260x too small!
+Reading a float from HBM vs from registers: **500x slower**. So caches matter ENORMOUSLY.
 
-It MUST live in global memory (HBM).
-Every token generated requires reading ALL 13.4 GB.
-That's why inference = memory-bandwidth-bound.
+But here's the wrinkle: LLM weights (13.4 GB for Llama-7B) can't fit in ANY cache.
+They live in HBM. Every token generation reads all 13.4 GB once. Even with perfect
+caching, memory bandwidth is the bottleneck.
 
-Make HBM access efficient = faster models.
-Make HBM access wasteful = slower models.
-Today you learn the difference.
+## 2.3 Cache Lines — The Unit of Memory Fetch
+
+Your program says "read 4 bytes from address 100." The GPU doesn't actually read 4 bytes.
+It reads an entire **cache line** containing that address.
+
 ```
+L2 cache line: 32 bytes (bytes 96 to 127, say)
+L1 cache line: 128 bytes (bytes 0 to 127)
+
+Why different sizes?
+  L2 is SHARED across all SMs. Many tiny requests. Smaller chunks = less waste.
+  L1 is DEDICATED to one SM. Big chunks match warp size (32 × 4 = 128 bytes).
+```
+
+The 128-byte L1 line size is not arbitrary. It's **exactly the size of a warp's
+coalesced float access**: 32 threads × 4 bytes each = 128 bytes. That's NVIDIA's
+entire hardware designed around one access pattern.
+
+When you access memory consecutively, you get the cache line for free after the first
+access — the next 31 reads hit cache. This is why **spatial locality** wins on GPUs
+just like it wins on CPUs.
 
 ---
 
-# PART 2: HOW GLOBAL MEMORY PHYSICALLY WORKS
+# PART 3: COALESCING — THE MOST IMPORTANT GPU CONCEPT
 
-## 2.1 HBM — Stacked Memory Chips
+## 3.1 The Coalescing Rule
 
-```
-    ┌─────────────────────────────────────────┐
-    │           GPU Package (top view)         │
-    │                                          │
-    │  ┌────┐  ┌────┐  ┌────────┐  ┌────┐     │
-    │  │HBM │  │HBM │  │  GPU   │  │HBM │     │
-    │  │ #1 │  │ #2 │  │  Die   │  │ #3 │     │
-    │  │5GB │  │5GB │  │        │  │5GB │     │
-    │  └────┘  └────┘  └────────┘  └────┘     │
-    │     │       │       ↑          │        │
-    │     └───────┼───────┼──────────┘        │
-    │             │       │                   │
-    │        Memory Controllers on GPU die    │
-    │        (thousands of parallel wires)    │
-    └─────────────────────────────────────────┘
+Every time a warp (32 threads) issues a memory access, the GPU:
 
-Each HBM stack = 4-12 DRAM chips stacked VERTICALLY
-Connected via Through-Silicon Vias (TSVs) — thousands of tiny wires.
+1. Collects the 32 addresses each thread wants
+2. Groups them by which cache line each falls into
+3. Issues ONE memory transaction per unique cache line
+4. Delivers each thread its byte(s) from the fetched lines
 
-This is why HBM is so fast:
-  DDR5 (CPU): 128 wires, narrow bus
-  HBM3 (GPU): 1024 wires per stack × 5 stacks = 5120 wires
-  
-  More wires = more parallel data transfer = more bandwidth.
+**The rule:** minimum transactions = minimum cache lines touched.
+
+Best case: all 32 in one line → 1 transaction (at L1) or 4 (at L2). FAST.
+Worst case: all 32 in different lines → 32 transactions. 32x slower.
+
+## 3.2 Real Example With Numbers
+
+Array of 1000 floats, each 4 bytes. Array starts at byte address 0.
+
+### Pattern A: Consecutive (COALESCED — GOOD)
+```c
+int i = blockIdx.x * blockDim.x + threadIdx.x;
+float x = A[i];  // each thread reads A[thread_id]
 ```
 
-## 2.2 Memory Transactions: The Unit of Work
-
-**Critical insight:** The GPU CAN'T read 1 byte from HBM. The smallest unit is a transaction.
-
 ```
-TRANSACTION SIZE:
-  L1 cache line: 128 bytes
-  L2 cache line: 32 bytes
-
-When a warp (32 threads) wants to read from HBM:
-  The GPU checks WHICH ADDRESSES the 32 threads need.
-  Groups them into 32-byte or 128-byte segments.
-  Issues ONE transaction per unique segment.
-
-Best case (COALESCED):
-  32 threads read addresses 0, 4, 8, ..., 124 (all within one 128-byte line)
-  → 1 transaction of 128 bytes serves all 32 threads
-  → Each thread gets its 4 bytes at full speed
-
-Worst case (UNCOALESCED):
-  32 threads read addresses 0, 1024, 2048, ..., all scattered
-  → 32 separate 32-byte transactions (1024 bytes total)
-  → 8x more data fetched than needed!
-  → Bandwidth wasted.
-```
-
-## 2.3 Cache Lines — The Key Unit
-
-```
-ALL HBM reads go through L2, then to L1 (or shared memory).
-L2 operates in 32-byte chunks. L1 in 128-byte chunks.
-
-When you access memory[100]:
-  GPU doesn't read 4 bytes from HBM.
-  It fetches the 128-byte cache line containing address 100.
-  That's memory[96] through memory[127] (if 4-byte aligned floats).
-
-Implication: if your warp's NEXT access is memory[104],
-  it's ALREADY IN CACHE. Free.
-
-This is why consecutive access is fast — you pay for the cache line once,
-then get 31 more reads "for free" until you cross to the next cache line.
-```
-
----
-
-# PART 3: COALESCED vs UNCOALESCED ACCESS
-
-This is the #1 performance concept in CUDA. Master it and you understand 80% of GPU optimization.
-
-## 3.1 Coalesced Access — The Fast Case
-
-```
-Thread assignments within a warp (32 threads):
-  Thread 0  reads A[0]
-  Thread 1  reads A[1]
-  Thread 2  reads A[2]
+Warp 0 (threads 0-31):
+  Thread 0:  A[0]  → byte 0
+  Thread 1:  A[1]  → byte 4
+  Thread 2:  A[2]  → byte 8
   ...
-  Thread 31 reads A[31]
+  Thread 31: A[31] → byte 124
 
-Addresses (assuming float = 4 bytes, A starts at address 0):
-  Thread 0:  addr 0
-  Thread 1:  addr 4
-  Thread 2:  addr 8
+All 32 addresses span bytes 0-127 = ONE 128-byte L1 line.
+→ 1 transaction. 100% efficient.
+```
+
+### Pattern B: Stride 32 (UNCOALESCED — BAD)
+```c
+int i = blockIdx.x * blockDim.x + threadIdx.x;
+float x = A[i * 32];  // stride of 32
+```
+
+```
+Warp 0:
+  Thread 0:  A[0]   → byte 0      → line 0
+  Thread 1:  A[32]  → byte 128    → line 1  ← different line!
+  Thread 2:  A[64]  → byte 256    → line 2
   ...
-  Thread 31: addr 124
+  Thread 31: A[992] → byte 3968   → line 31
 
-Total span: 0 to 127 = exactly ONE 128-byte cache line.
-
-GPU issues: 1 memory transaction.
-Bytes fetched: 128.
-Bytes used:   128.
-Efficiency:   100% ✓
-
-This is the ideal access pattern. This is what vec_add does.
+32 different cache lines touched.
+→ 32 transactions. Only 4 bytes used per 128 bytes fetched.
+→ 32x wasted bandwidth = kernel ~32x slower.
 ```
 
-Visually:
+### Pattern C: Stride 2 (half-bad)
 ```
-Memory:    [0][1][2][3][4][5][6][7] ... [29][30][31]
-Threads:    T0 T1 T2 T3 T4 T5 T6 T7     T29 T30 T31
-                              ↓
-           ONE transaction fetches 128 bytes.
-           All 32 threads served.
-```
-
-## 3.2 Uncoalesced Access — The Slow Case
-
-### Case A: Strided access (every 32nd element)
-```
-Thread 0  reads A[0]    (addr 0)
-Thread 1  reads A[32]   (addr 128)
-Thread 2  reads A[64]   (addr 256)
+Thread 0:  A[0]   → byte 0      → line 0
+Thread 1:  A[2]   → byte 8      → line 0   ← same line
+Thread 2:  A[4]   → byte 16     → line 0
 ...
-Thread 31 reads A[992]  (addr 3968)
+Thread 16: A[32]  → byte 128    → line 1   ← new line
+Thread 31: A[62]  → byte 248    → line 1
 
-Each thread's address is in a DIFFERENT cache line!
-GPU issues: 32 separate 128-byte transactions.
-Bytes fetched: 32 × 128 = 4096 bytes.
-Bytes used:   32 × 4 = 128 bytes.
-Efficiency:   128 / 4096 = 3.125% ← wasted 97% of bandwidth!
-
-Kernel runs ~32x slower due to this alone.
+Only 2 cache lines touched.
+→ 2 transactions. 50% efficient. Kernel ~2x slower than perfect.
 ```
 
-Visually:
-```
-Cache line 0:   [T0][ ][ ][ ] ... [ ][ ][ ][ ]   ← only 1 byte needed from here
-Cache line 1:   [T1][ ][ ][ ] ... [ ][ ][ ][ ]   ← only 1 byte needed here
-Cache line 2:   [T2][ ][ ][ ] ... [ ][ ][ ][ ]   ← etc...
-...
-Cache line 31:  [T31][ ][ ][ ] ...               ← 32 separate transactions!
+## 3.3 Why The Formula `i = blockIdx.x * blockDim.x + threadIdx.x` Matters
+
+This is the canonical CUDA indexing pattern. **It GUARANTEES coalescing.**
+
+```c
+// Thread 0 in block 0: i = 0
+// Thread 1 in block 0: i = 1
+// Thread 2 in block 0: i = 2
+// ...
+// Thread 0 in block 1: i = blockDim.x (e.g., 256)
+// Thread 1 in block 1: i = blockDim.x + 1
 ```
 
-### Case B: Random access
+**Within a warp** (32 threads with consecutive threadIdx.x values), `i` increments by 1.
+`A[i]` accesses consecutive addresses. Coalesced.
+
+This is why every CUDA tutorial uses this formula. It's not just convention — it's
+the formula that gives you peak bandwidth. Any other indexing is slower unless you
+have a very specific reason.
+
+## 3.4 Connection To LLMs
+
+Matrix multiply is THE LLM operation. How you index matters enormously.
+
 ```
-Threads access random memory addresses:
-  Thread 0  reads A[47291]
-  Thread 1  reads A[128]
-  Thread 2  reads A[9872341]
+A matrix A[rows × cols] stored row-major in memory:
+  A[0][0], A[0][1], A[0][2], ..., A[0][cols-1],
+  A[1][0], A[1][1], ..., A[1][cols-1],
   ...
 
-Similar result: many cache lines touched, many transactions.
-Efficiency can drop below 3%.
-```
+Access pattern 1 — ROW-MAJOR (COALESCED):
+  Thread t reads A[row][t] — consecutive memory → FAST
 
-## 3.3 The Rule for Coalesced Access
+Access pattern 2 — COLUMN-MAJOR (UNCOALESCED):  
+  Thread t reads A[t][col] — stride = cols → SLOW
 
-```
-COALESCED = threads T0, T1, T2, ..., T31 access
-            CONSECUTIVE memory addresses.
-
-Good: A[threadIdx.x]           ← consecutive ✓
-Good: A[blockIdx.x * N + threadIdx.x]  ← consecutive within a block ✓
-
-Bad:  A[threadIdx.x * 32]      ← strided ✗
-Bad:  A[hash(threadIdx.x)]     ← random ✗
-
-The formula `i = blockIdx.x * blockDim.x + threadIdx.x`
-GUARANTEES coalesced access when you do A[i].
-
-This is why it's the standard CUDA pattern.
-```
-
-## 3.4 Why This Matters For LLMs
-
-```
-Matrix stored row-major (standard):
-  W = [[w00, w01, w02, w03],
-       [w10, w11, w12, w13],
-       [w20, w21, w22, w23]]
-
-In memory (1D):
-  W[0], W[1], W[2], W[3], W[4], W[5], ...
-  w00   w01   w02   w03   w10   w11   ...
-
-If threads access the SAME ROW at consecutive columns → COALESCED ✓
-If threads access the SAME COLUMN at consecutive rows → UNCOALESCED ✗
-  (Because column elements are far apart in memory: w00, w10, w20 — 
-   each separated by 4 × 4 = 16 bytes for a 4-column matrix)
-
-This is why:
-  Matrix layout (row-major vs column-major) MATTERS.
-  Whether you read across rows or down columns MATTERS.
-  cuBLAS is column-major but takes care of all this for you.
-```
-
----
-
-# PART 4: MEMORY ALIGNMENT
-
-## 4.1 What Alignment Means
-
-```
-A memory address is "N-byte aligned" if it's divisible by N.
-
-float (4 bytes):   needs 4-byte alignment → address must be multiple of 4
-double (8 bytes):  needs 8-byte alignment → address must be multiple of 8
-float4 (16 bytes): needs 16-byte alignment → address must be multiple of 16
-
-cudaMalloc() always returns 256-byte-aligned addresses. Good.
-But custom allocators or struct layouts can create misaligned access.
-```
-
-## 4.2 Why Misaligned Access Is Slow
-
-```
-Aligned float4 load (16 bytes):
-  Address = 128 (divisible by 16)
-  Fetches bytes 128-143 in one transaction.
+Naive matrix multiply (CPU-style):
+  for each output element C[i][j]:
+    for k: sum += A[i][k] * B[k][j]
   
-Misaligned float4 load (16 bytes):
-  Address = 130 (NOT divisible by 16)
-  Spans cache line boundary: needs bytes 128-131 AND 132-143
-  GPU issues 2 transactions instead of 1.
-  2x slower!
+  B[k][j] access is column-major within the inner loop → UNCOALESCED!
+  This is why naive matmul is 10-30x slower than tiled matmul.
 ```
 
-## 4.3 Practical Rules
-
-```
-✓ Use cudaMalloc() — always returns aligned memory
-✓ Keep structs simple — avoid mixing sizes that misalign
-✓ Use float4 for vectorized access (read 4 floats at once)
-
-Example of float4 vectorized access (advanced trick):
-
-// Instead of:
-for (int i = 0; i < N; i++) C[i] = A[i] + B[i];  // 1 float per thread
-
-// Use float4 (4 floats per thread):
-float4 *A4 = reinterpret_cast<float4*>(A);
-float4 *B4 = reinterpret_cast<float4*>(B);
-float4 *C4 = reinterpret_cast<float4*>(C);
-for (int i = 0; i < N/4; i++) {
-    float4 a = A4[i];  // loads 16 bytes in ONE instruction
-    float4 b = B4[i];
-    C4[i] = make_float4(a.x+b.x, a.y+b.y, a.z+b.z, a.w+b.w);
-}
-// Same total work, but 4x fewer memory instructions → faster.
-// Libraries like cuBLAS use this trick extensively.
-```
+Flash Attention, cuBLAS, and every fast kernel are designed to make every memory
+access coalesced. When you implement attention yourself (Week 11), you'll design
+layouts specifically so threads read consecutively.
 
 ---
 
-# PART 5: THE cudaMemcpy FAMILY
+# PART 4: THE cudaMemcpy STORY
 
-## 5.1 All cudaMemcpy Directions
+## 4.1 Why cudaMemcpy Exists
+
+CPU and GPU have **different memory spaces**. The CPU can't directly access GPU
+memory (and vice versa) because they're physically separate chips connected by a
+thin PCIe wire.
+
+Early CUDA (2007) required explicit copies: `cudaMemcpy(gpu_ptr, cpu_ptr, bytes, H2D)`.
+Programmers hated it. Lots of boilerplate, easy to mess up direction.
+
+Over time, NVIDIA added conveniences — but the underlying reality hasn't changed.
+PCIe is still the bottleneck between CPU and GPU.
+
+## 4.2 The Bandwidth Reality
+
+```
+CPU RAM (DDR5):      ~100 GB/s
+PCIe 4.0 x16:        ~25 GB/s    ← the bridge between CPU and GPU
+GPU HBM3:            ~3,350 GB/s ← on-GPU bandwidth
+
+Moving 14 GB (Llama-7B weights) CPU → GPU:
+  14 / 25 = 0.56 seconds
+
+Running that model once on GPU:
+  14 / 3,350 = 4 ms (142x faster than the copy!)
+
+Implication: once your data is on GPU, KEEP IT THERE.
+Every CPU↔GPU transfer is a massive cost.
+```
+
+This is why when you call `.to('cuda')` in PyTorch, it's slow the first time and
+fast forever after (the data stays on GPU). And why `model.cpu().cuda()` in a loop
+is a performance disaster.
+
+## 4.3 The Five Directions
 
 ```c
 cudaMemcpy(dst, src, size, kind);
-
-kind values:
-  cudaMemcpyHostToDevice     CPU RAM → GPU HBM    (over PCIe, slow: ~25 GB/s)
-  cudaMemcpyDeviceToHost     GPU HBM → CPU RAM    (over PCIe, slow: ~25 GB/s)
-  cudaMemcpyDeviceToDevice   GPU HBM → GPU HBM    (fast: full HBM speed ~300 GB/s)
-  cudaMemcpyHostToHost       CPU RAM → CPU RAM    (avoid, use memcpy())
-  cudaMemcpyDefault          GPU infers direction (convenient, uses same bandwidth)
 ```
 
-## 5.2 Variants for Advanced Use
+| Direction | Speed | When To Use |
+|-----------|-------|-------------|
+| `cudaMemcpyHostToDevice` | ~25 GB/s (PCIe) | Loading model weights, input data |
+| `cudaMemcpyDeviceToHost` | ~25 GB/s (PCIe) | Reading results back for display |
+| `cudaMemcpyDeviceToDevice` | ~3000 GB/s (HBM) | Copying within GPU — FAST |
+| `cudaMemcpyHostToHost` | ~50 GB/s (CPU) | Rare, use `memcpy()` instead |
+| `cudaMemcpyDefault` | auto-detected | Convenient but slight overhead |
 
+**Modern twist — Unified Memory:**
 ```c
-// Async — don't block the CPU, comes back immediately
-cudaMemcpyAsync(dst, src, size, kind, stream);
-
-// 2D — for images or 2D arrays with pitch (row padding)
-cudaMemcpy2D(dst, dpitch, src, spitch, width, height, kind);
-
-// 3D — for 3D data
-cudaMemcpy3D(&params);
-
-// Managed memory (unified) — one pointer works on both CPU and GPU
 cudaMallocManaged(&ptr, size);
-// No need for cudaMemcpy! GPU driver migrates pages as needed.
-// Convenient but has hidden costs.
+// One pointer, works on both CPU and GPU.
+// Driver migrates pages automatically when needed.
 ```
 
-## 5.3 PCIe Bottleneck
-
-```
-CPU-GPU data transfer goes over PCIe:
-  PCIe 3.0 x16: ~12 GB/s
-  PCIe 4.0 x16: ~25 GB/s
-  PCIe 5.0 x16: ~50 GB/s
-
-Compare:
-  GPU HBM bandwidth: 300-3350 GB/s (12-100x faster than PCIe!)
-
-Implication: CPU-GPU transfers are THE bottleneck.
-  Moving a 14 GB LLM from CPU → GPU: 14 / 25 = 0.56 seconds (PCIe 4.0)
-  Running the same model once generation: ~4 ms on H100
-
-Golden rule: minimize CPU↔GPU transfers.
-  - Load weights once, keep them on GPU
-  - Process in batches to amortize transfer cost
-  - Use async transfers overlapped with compute (next week)
-```
+Convenient but with hidden costs. When GPU accesses a page the CPU recently wrote,
+the driver must copy it over at ~25 GB/s. Can be slower than explicit copies if
+you don't understand the page migration pattern.
 
 ---
 
-# PART 6: MEASURING BANDWIDTH
+# PART 5: HANDS-ON — PROVING THE THEORY
 
-## 6.1 The Formula
+Theory is worthless without proof. Let's measure coalescing's impact ourselves.
 
-```
-bandwidth (GB/s) = bytes_transferred / time_taken_in_seconds / 1e9
-
-For a vector add C = A + B with N floats:
-  Reads:  2 × N × 4 bytes  (A and B)
-  Writes: 1 × N × 4 bytes  (C)
-  Total:  3 × N × 4 bytes = 12N bytes
-
-If kernel takes 0.04 ms on N = 1M:
-  bandwidth = 12,000,000 bytes / 0.00004 seconds / 1e9
-            = 300 GB/s
-
-Compare to T4 peak (~320 GB/s) → 94% efficiency. Excellent!
-```
-
-## 6.2 What Peak Bandwidth You Should Expect
-
-```
-GPU              Peak HBM bw   Realistic max
-─────────────────────────────────────────────
-T4 (Colab free)   320 GB/s     ~280 GB/s (88%)
-V100              900 GB/s     ~800 GB/s
-A100              1555 GB/s    ~1400 GB/s
-H100              3350 GB/s    ~3000 GB/s
-
-Below 60% = something is wrong (bad access pattern or small data)
-60-85%     = decent, can be improved
-85-95%     = excellent, near-optimal kernel
->95%       = you're hitting the hardware wall
-```
-
----
-
-# PART 7: CODING EXERCISES
-
-## Exercise 1: Coalesced vs Strided Access
-
-Setup: Run these in Colab. They show the SAME amount of data read,
-but with different access patterns. The performance difference is dramatic.
+## 5.1 Exercise 1: Prove Coalescing Matters
 
 ```c
-%%writefile coalesce_test.cu
+%%writefile coalesce_demo.cu
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -473,87 +396,85 @@ but with different access patterns. The performance difference is dramatic.
     }                                                            \
 } while(0)
 
-// GOOD: Coalesced access — thread i reads A[i]
-__global__ void coalesced_copy(float *in, float *out, int N) {
+// GOOD: Each thread reads the address corresponding to its ID.
+// Warp 0's threads access bytes 0-127 of A → one cache line.
+__global__ void coalesced(float *in, float *out, int N) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < N) out[i] = in[i];
 }
 
-// BAD: Strided access — thread i reads A[i * STRIDE]
-__global__ void strided_copy(float *in, float *out, int N, int stride) {
+// BAD: Thread i reads A[i*stride]. Consecutive threads jump by 'stride'.
+// For stride=32, each thread's address is in a different cache line.
+__global__ void strided(float *in, float *out, int N, int stride) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int idx = i * stride;
-    if (idx < N) out[i] = in[idx];
+    if (i * stride < N) out[i] = in[i * stride];
 }
 
 int main() {
-    int N = 16 * 1024 * 1024;   // 16M floats = 64 MB
+    int N = 16 * 1024 * 1024;    // 16 million floats = 64 MB
     size_t bytes = N * sizeof(float);
     
     float *d_in, *d_out;
     CUDA_CHECK(cudaMalloc(&d_in, bytes));
     CUDA_CHECK(cudaMalloc(&d_out, bytes));
     
-    int block_size = 256;
-    int blocks = (N + block_size - 1) / block_size;
+    int bs = 256;
+    int blocks = (N + bs - 1) / bs;
     
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     
-    // Warmup
-    coalesced_copy<<<blocks, block_size>>>(d_in, d_out, N);
+    printf("════════════════════════════════════════════════════\n");
+    printf("  Coalescing Demo (16M floats = 64 MB)\n");
+    printf("════════════════════════════════════════════════════\n");
+    printf("  Pattern      │ Time (ms) │ Effective BW (GB/s)\n");
+    printf("────────────────────────────────────────────────────\n");
+    
+    // Warmup + benchmark coalesced
+    coalesced<<<blocks, bs>>>(d_in, d_out, N);
     cudaDeviceSynchronize();
     
-    printf("╔═══════════════════════════════════════════════════════════╗\n");
-    printf("║          Coalesced vs Strided Access Benchmark            ║\n");
-    printf("║          %d elements (%.0f MB)                      ║\n", N, bytes/1e6);
-    printf("╠═══════════════════════════════════════════════════════════╣\n");
-    printf("║ Access Pattern │ Time (ms) │ Bandwidth │ Slowdown        ║\n");
-    printf("╠═══════════════════════════════════════════════════════════╣\n");
-    
-    // Benchmark coalesced
     cudaEventRecord(start);
-    for (int i = 0; i < 50; i++)
-        coalesced_copy<<<blocks, block_size>>>(d_in, d_out, N);
+    for (int i = 0; i < 100; i++)
+        coalesced<<<blocks, bs>>>(d_in, d_out, N);
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
-    float ms_coalesced;
-    cudaEventElapsedTime(&ms_coalesced, start, stop);
-    ms_coalesced /= 50;
-    float bw_coalesced = 2.0f * bytes / (ms_coalesced/1000.0f) / 1e9;
-    printf("║ Coalesced      │ %9.3f │ %6.0f GB/s │ 1.0x (baseline) ║\n",
-           ms_coalesced, bw_coalesced);
     
-    // Benchmark different strides
+    float ms_c;
+    cudaEventElapsedTime(&ms_c, start, stop);
+    ms_c /= 100;
+    float bw_c = 2.0f * bytes / (ms_c/1000.0f) / 1e9;
+    printf("  Coalesced    │ %8.3f │ %6.0f           \n", ms_c, bw_c);
+    
+    // Benchmark various strides
     int strides[] = {2, 4, 8, 16, 32};
     for (int s = 0; s < 5; s++) {
         int stride = strides[s];
-        int N_effective = N / stride;
+        int N_eff = N / stride;
         
-        // Warmup
-        strided_copy<<<blocks, block_size>>>(d_in, d_out, N, stride);
+        strided<<<blocks, bs>>>(d_in, d_out, N, stride);
         cudaDeviceSynchronize();
         
         cudaEventRecord(start);
-        for (int i = 0; i < 50; i++)
-            strided_copy<<<blocks, block_size>>>(d_in, d_out, N, stride);
+        for (int i = 0; i < 100; i++)
+            strided<<<blocks, bs>>>(d_in, d_out, N, stride);
         cudaEventRecord(stop);
         cudaEventSynchronize(stop);
-        float ms_strided;
-        cudaEventElapsedTime(&ms_strided, start, stop);
-        ms_strided /= 50;
         
-        // Effective bytes = only the bytes actually needed
-        float bytes_useful = 2.0f * N_effective * sizeof(float);
-        float bw_strided = bytes_useful / (ms_strided/1000.0f) / 1e9;
+        float ms_s;
+        cudaEventElapsedTime(&ms_s, start, stop);
+        ms_s /= 100;
         
-        printf("║ Stride %-7d │ %9.3f │ %6.0f GB/s │ %4.1fx slower     ║\n",
-               stride, ms_strided, bw_strided, ms_strided/ms_coalesced);
+        // Effective BW = bytes the kernel actually USED, not fetched
+        float bw_s = 2.0f * N_eff * sizeof(float) / (ms_s/1000.0f) / 1e9;
+        printf("  Stride %2d    │ %8.3f │ %6.0f           \n",
+               stride, ms_s, bw_s);
     }
     
-    printf("╚═══════════════════════════════════════════════════════════╝\n");
-    printf("\nLesson: Coalesced access is critical. Stride patterns waste bandwidth.\n");
+    printf("════════════════════════════════════════════════════\n");
+    printf("  Lesson: stride=N means N-x bandwidth waste.\n");
+    printf("════════════════════════════════════════════════════\n");
     
     cudaFree(d_in); cudaFree(d_out);
     return 0;
@@ -561,199 +482,113 @@ int main() {
 ```
 
 ```python
-!nvcc coalesce_test.cu -o coalesce_test && ./coalesce_test
+!nvcc coalesce_demo.cu -o coalesce_demo && ./coalesce_demo
 ```
 
-**What you'll see on a T4:**
+**What you'll see** (T4 numbers, yours will be similar):
+
 ```
-║ Coalesced      │     3.5   │   280 GB/s │ 1.0x (baseline) ║
-║ Stride 2       │     3.5   │   140 GB/s │ 1.0x slower     ║
-║ Stride 4       │     3.5   │    70 GB/s │ 1.0x slower     ║
-║ Stride 8       │     3.5   │    35 GB/s │ 1.0x slower     ║
-║ Stride 16      │     3.5   │    17 GB/s │ 1.0x slower     ║
-║ Stride 32      │     3.5   │    8 GB/s  │ 1.0x slower     ║
+Pattern     │ Time (ms) │ Effective BW (GB/s)
+Coalesced   │    0.450  │     284
+Stride  2   │    0.450  │     142
+Stride  4   │    0.450  │      71
+Stride  8   │    0.450  │      36
+Stride 16   │    0.450  │      18
+Stride 32   │    0.450  │       9
 ```
 
-**Why same time but lower bandwidth?**
-Each strided access still loads FULL cache lines, but you only USE a fraction.
-Time is similar because the GPU still does the same amount of work.
-But "effective bandwidth" (bytes you USE) drops proportionally to stride.
+**Read this carefully.** The TIME stays roughly the same. But the **effective**
+bandwidth crashes. Why? The GPU is fetching the same amount of data in all cases
+(memory controllers saturated). But at stride 32, only 1/32 of the fetched bytes
+are actually used by your kernel. You're paying for bandwidth you don't use.
 
-### Understanding the Code
+In a real kernel where you care about USEFUL work per second, stride 32 is 32x
+slower than coalesced. Coalescing isn't a "nice to have" — it's the difference
+between a GPU feeling like a GPU vs. a GPU feeling like a slow CPU.
+
+### Reading The Code
 
 ```c
-__global__ void coalesced_copy(float *in, float *out, int N) {
+__global__ void coalesced(float *in, float *out, int N) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < N) out[i] = in[i];
 }
 ```
-```
-This is the canonical pattern. Each thread reads its own element.
-Thread 0: in[0] → out[0]
-Thread 1: in[1] → out[1]
-...
-All threads in a warp read consecutive addresses → COALESCED.
-```
+- `i = blockIdx.x * blockDim.x + threadIdx.x` — standard pattern.
+- Warp 0: threadIdx.x = 0..31 → i = 0..31 → bytes 0..127 → ONE cache line.
+- Warp 1: threadIdx.x = 0..31, blockIdx.x = 0, blockDim.x = 256 → i = 32..63 → bytes 128..255 → ONE cache line.
+- Every warp's 32 threads access one cache line each. Optimal.
 
 ```c
-__global__ void strided_copy(float *in, float *out, int N, int stride) {
+__global__ void strided(float *in, float *out, int N, int stride) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int idx = i * stride;
-    if (idx < N) out[i] = in[idx];
+    if (i * stride < N) out[i] = in[i * stride];
 }
 ```
-```
-With stride=4:
-  Thread 0: in[0]  → out[0]
-  Thread 1: in[4]  → out[1]
-  Thread 2: in[8]  → out[2]
-  ...
-  Thread 31: in[124] → out[31]
-  
-Addresses within the warp span: 0 to 124 × 4 bytes = 124 × 4 = 496 bytes.
-That's 4 cache lines (128 bytes each).
-GPU loads 4 × 128 = 512 bytes, but only uses 32 × 4 = 128 bytes.
-Efficiency: 25%.
+- Input index is `i * stride`, not `i`.
+- With stride=32: threadIdx.x 0 → in[0], threadIdx.x 1 → in[32], ...
+- Warp 0: threads access in[0], in[32], ..., in[992] = bytes 0, 128, 256, ..., 3968.
+- 32 different cache lines. Disaster.
 
-With stride=32: addresses span 32 × 128 = 4096 bytes = 32 cache lines.
-GPU loads 32 × 128 = 4096 bytes, uses 128. Efficiency: 3%.
-```
-
-## Exercise 2: Memory Bandwidth Benchmark
+## 5.2 Exercise 2: Compute Your GPU's Theoretical Peak
 
 ```c
-%%writefile bw_test.cu
+%%writefile peak_bw.cu
 #include <stdio.h>
-#include <stdlib.h>
-
-#define CUDA_CHECK(call) do {                                    \
-    cudaError_t err = call;                                      \
-    if (err != cudaSuccess) {                                    \
-        printf("CUDA error: %s\n", cudaGetErrorString(err));      \
-        exit(1);                                                 \
-    }                                                            \
-} while(0)
-
-// Just copy memory: read and write one array
-__global__ void copy_kernel(float *in, float *out, int N) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < N) out[i] = in[i];
-}
+#include <cuda_runtime.h>
 
 int main() {
-    // Query device properties
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     
-    float peak_bw_gb_s = 2.0f * prop.memoryClockRate * 1000.0f * 
-                          (prop.memoryBusWidth / 8) / 1e9;
+    // Formula: 2 (DDR) × clock_rate × (bus_width / 8) / 1e9 GB/s
+    // Why 2? Double-Data-Rate: memory transfers on both clock edges.
+    // clock_rate is in kHz from CUDA → multiply by 1000 for Hz.
+    // bus_width is in bits → divide by 8 for bytes.
     
-    printf("GPU: %s\n", prop.name);
-    printf("Memory clock: %d MHz\n", prop.memoryClockRate / 1000);
-    printf("Memory bus width: %d bits\n", prop.memoryBusWidth);
-    printf("Theoretical peak bandwidth: %.1f GB/s\n\n", peak_bw_gb_s);
+    double clock_hz   = prop.memoryClockRate * 1000.0;
+    double bus_bytes  = prop.memoryBusWidth / 8.0;
+    double peak_gb_s  = 2.0 * clock_hz * bus_bytes / 1e9;
     
-    printf("Size (MB) | Time (ms) | Bandwidth (GB/s) | Efficiency\n");
-    printf("──────────┼───────────┼──────────────────┼───────────\n");
+    printf("╔════════════════════════════════════════════╗\n");
+    printf("║ GPU: %-38s ║\n", prop.name);
+    printf("╠════════════════════════════════════════════╣\n");
+    printf("║ Memory clock:     %.2f GHz                 ║\n", clock_hz / 1e9);
+    printf("║ Memory bus width: %d bits                   ║\n", prop.memoryBusWidth);
+    printf("║ Bytes per cycle:  %.0f                      ║\n", bus_bytes * 2);
+    printf("║ Peak bandwidth:   %.1f GB/s                ║\n", peak_gb_s);
+    printf("╚════════════════════════════════════════════╝\n");
     
-    // Test with various sizes
-    int sizes_mb[] = {1, 4, 16, 64, 256};
-    
-    for (int s = 0; s < 5; s++) {
-        int size_mb = sizes_mb[s];
-        int N = size_mb * 1024 * 1024 / sizeof(float);
-        size_t bytes = N * sizeof(float);
-        
-        float *d_in, *d_out;
-        CUDA_CHECK(cudaMalloc(&d_in, bytes));
-        CUDA_CHECK(cudaMalloc(&d_out, bytes));
-        
-        int block_size = 256;
-        int blocks = (N + block_size - 1) / block_size;
-        
-        // Warmup
-        copy_kernel<<<blocks, block_size>>>(d_in, d_out, N);
-        cudaDeviceSynchronize();
-        
-        cudaEvent_t start, stop;
-        cudaEventCreate(&start);
-        cudaEventCreate(&stop);
-        
-        cudaEventRecord(start);
-        for (int i = 0; i < 50; i++)
-            copy_kernel<<<blocks, block_size>>>(d_in, d_out, N);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        
-        float ms;
-        cudaEventElapsedTime(&ms, start, stop);
-        ms /= 50;
-        
-        // Bytes transferred: read once + write once = 2 × bytes
-        float bw = 2.0f * bytes / (ms/1000.0f) / 1e9;
-        float efficiency = 100.0f * bw / peak_bw_gb_s;
-        
-        printf("%8d  │ %9.3f │ %16.1f │ %8.1f%%\n",
-               size_mb, ms, bw, efficiency);
-        
-        cudaEventDestroy(start);
-        cudaEventDestroy(stop);
-        cudaFree(d_in);
-        cudaFree(d_out);
-    }
+    printf("\nWhat this means for LLMs:\n");
+    printf("  Llama-7B FP16 (13.4 GB): max %.0f tokens/sec\n", peak_gb_s / 13.4);
+    printf("  Llama-7B INT4 (3.4 GB):  max %.0f tokens/sec\n", peak_gb_s / 3.4);
+    printf("  (memory-bound, decode phase)\n");
     
     return 0;
 }
 ```
 
 ```python
-!nvcc bw_test.cu -o bw_test && ./bw_test
+!nvcc peak_bw.cu -o peak_bw && ./peak_bw
 ```
 
-**What to observe:**
-- Small arrays (1 MB) → lower bandwidth (overhead dominates)
-- Large arrays (64+ MB) → close to peak bandwidth
-- Understanding peak bandwidth is how you know if your kernel is optimized
-
-### Understanding the Device Query Code
-
-```c
-cudaDeviceProp prop;
-cudaGetDeviceProperties(&prop, 0);
-
-float peak_bw_gb_s = 2.0f * prop.memoryClockRate * 1000.0f * 
-                      (prop.memoryBusWidth / 8) / 1e9;
-```
-```
-Formula for peak theoretical bandwidth:
-  peak_bw = 2 × memory_clock × (bus_width / 8)
-
-Where:
-  2 × (DDR = Double Data Rate: transfers on both clock edges)
-  memory_clock (kHz from CUDA, multiply by 1000 for Hz)
-  bus_width (bits) / 8 = bytes per transfer
-
-For T4:
-  memory_clock = 5,001,000 kHz = 5 GHz
-  bus_width = 256 bits
-  peak_bw = 2 × 5e9 × 256/8 / 1e9 = 320 GB/s ✓
-
-For H100:
-  memory_clock = 2,619,000 kHz
-  bus_width = 5120 bits
-  peak_bw = 2 × 2.619e9 × 5120/8 / 1e9 = 3,350 GB/s ✓
-
-This is the HARDWARE LIMIT. No kernel can exceed this.
-If your kernel achieves 280 GB/s on T4, that's 88% of peak — excellent.
-```
+On T4 you'll see ~320 GB/s. Remember this number — it's your GPU's hard ceiling.
+Every kernel you write should aim for 80-95% of this. Below 60% means something's wrong.
 
 ---
 
-# PART 8: TODAY'S MINI-PROJECT 🔨
+# PART 6: TODAY'S MINI-PROJECT 🔨
 
-## Project: "Bandwidth Dashboard — Know Your GPU's Limits"
+## "The Bandwidth Roast" — Test Your Own GPU's Memory System
 
-A tool that comprehensively benchmarks memory bandwidth with different access patterns, data sizes, and data types. Output a clean report.
+You're going to build a comprehensive memory bandwidth tester that demonstrates
+every concept from today: coalesced access, strided access, vectorized (float4) loads,
+and the effect of data size. The output is a report you could actually paste in a
+blog post or show to your team.
+
+**Why this project matters:** Once you have this tool, you can run it on ANY kernel
+you write. It tells you instantly if your kernel is memory-bound and how close to
+peak bandwidth it gets. This IS how NVIDIA engineers analyze performance.
 
 ```c
 %%writefile bw_dashboard.cu
@@ -768,79 +603,83 @@ A tool that comprehensively benchmarks memory bandwidth with different access pa
     }                                                            \
 } while(0)
 
-// Copy kernel (baseline: 2 arrays, read + write)
-__global__ void copy_kernel(float *in, float *out, int N) {
+// Standard coalesced copy — our baseline
+__global__ void copy_f32(float *in, float *out, int N) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < N) out[i] = in[i];
 }
 
-// Scale kernel (1 input + 1 output)
-__global__ void scale_kernel(float *in, float *out, float s, int N) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < N) out[i] = in[i] * s;
-}
-
-// Triad kernel (2 inputs + 1 output, STREAM benchmark style)
-__global__ void triad_kernel(float *A, float *B, float *C, float s, int N) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < N) C[i] = A[i] + s * B[i];
-}
-
-// Vectorized float4 copy (4 floats per thread, fewer memory instructions)
-__global__ void copy_vec4(float4 *in, float4 *out, int N4) {
+// Vectorized copy: each thread handles 4 floats at once.
+// float4 is a struct of 4 floats stored contiguously (16 bytes aligned).
+// Loading one float4 = one 16-byte instruction instead of four 4-byte ones.
+__global__ void copy_f4(float4 *in, float4 *out, int N4) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < N4) out[i] = in[i];
 }
 
-// Strided copy (shows bad access pattern impact)
-__global__ void strided_copy(float *in, float *out, int N, int stride) {
+// Strided copy — demonstrates uncoalesced penalty
+__global__ void copy_stride(float *in, float *out, int N, int stride) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i * stride < N) out[i] = in[i * stride];
 }
 
-float run_bench(void (*launcher)(float*, float*, int),
-                float *d_in, float *d_out, int N, int block_size) {
-    int blocks = (N + block_size - 1) / block_size;
+// The "triad" operation from STREAM benchmark: C = A + s*B
+// Reads 2 arrays, writes 1 array. Classic memory-bound pattern.
+__global__ void triad(float *A, float *B, float *C, float s, int N) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < N) C[i] = A[i] + s * B[i];
+}
+
+float time_kernel(void (*run)(float*, float*, float*, int, int),
+                   float *A, float *B, float *C, int N, int extra) {
+    int bs = 256;
     
-    // Warmup
-    launcher(d_in, d_out, N);
+    // Warmup (first launch always slow)
+    run(A, B, C, N, extra);
     cudaDeviceSynchronize();
     
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
-    
     cudaEventRecord(start);
-    for (int i = 0; i < 100; i++) launcher(d_in, d_out, N);
+    for (int i = 0; i < 100; i++) run(A, B, C, N, extra);
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
     
     float ms;
     cudaEventElapsedTime(&ms, start, stop);
-    
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
     return ms / 100;
 }
 
-void launch_copy(float *in, float *out, int N) {
+// Launchers so we can pass them as function pointers
+void run_copy_f32(float *A, float *B, float *C, int N, int unused) {
     int bs = 256;
-    copy_kernel<<<(N+bs-1)/bs, bs>>>(in, out, N);
+    copy_f32<<<(N+bs-1)/bs, bs>>>(A, B, N);
 }
-
-void launch_copy_vec4(float *in, float *out, int N) {
+void run_copy_f4(float *A, float *B, float *C, int N, int unused) {
     int bs = 256;
     int N4 = N / 4;
-    copy_vec4<<<(N4+bs-1)/bs, bs>>>((float4*)in, (float4*)out, N4);
+    copy_f4<<<(N4+bs-1)/bs, bs>>>((float4*)A, (float4*)B, N4);
+}
+void run_stride(float *A, float *B, float *C, int N, int stride) {
+    int bs = 256;
+    copy_stride<<<(N+bs-1)/bs, bs>>>(A, B, N, stride);
+}
+void run_triad(float *A, float *B, float *C, int N, int unused) {
+    int bs = 256;
+    triad<<<(N+bs-1)/bs, bs>>>(A, B, C, 2.5f, N);
 }
 
 int main() {
+    // Query device for theoretical peak
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
-    float peak_bw = 2.0f * prop.memoryClockRate * 1000.0f *
-                     (prop.memoryBusWidth / 8) / 1e9;
+    double peak = 2.0 * prop.memoryClockRate * 1000.0 *
+                   (prop.memoryBusWidth / 8.0) / 1e9;
     
-    int N = 64 * 1024 * 1024;   // 64M floats = 256 MB
+    int N = 64 * 1024 * 1024;    // 64M floats = 256 MB
     size_t bytes = N * sizeof(float);
     
     float *d_A, *d_B, *d_C;
@@ -848,69 +687,53 @@ int main() {
     CUDA_CHECK(cudaMalloc(&d_B, bytes));
     CUDA_CHECK(cudaMalloc(&d_C, bytes));
     
-    printf("╔════════════════════════════════════════════════════════════╗\n");
-    printf("║                  BANDWIDTH DASHBOARD                        ║\n");
-    printf("╠════════════════════════════════════════════════════════════╣\n");
-    printf("║ GPU:              %-40s ║\n", prop.name);
-    printf("║ Memory bus:       %d-bit %s                        ║\n",
-           prop.memoryBusWidth, prop.memoryBusWidth >= 1024 ? "HBM" : "GDDR");
-    printf("║ Theoretical peak: %.1f GB/s                              ║\n", peak_bw);
-    printf("║ Data size:        %d MB                                   ║\n", (int)(bytes/1024/1024));
-    printf("╠════════════════════════════════════════════════════════════╣\n");
-    printf("║ Test           │ Time (ms) │ Bandwidth │ Efficiency       ║\n");
-    printf("╠════════════════════════════════════════════════════════════╣\n");
+    printf("╔═══════════════════════════════════════════════════════════╗\n");
+    printf("║              BANDWIDTH DASHBOARD                           ║\n");
+    printf("╠═══════════════════════════════════════════════════════════╣\n");
+    printf("║ GPU:              %-40s║\n", prop.name);
+    printf("║ Peak bandwidth:   %.0f GB/s                              ║\n", peak);
+    printf("║ Data size:        %d MB                                  ║\n", (int)(bytes/1024/1024));
+    printf("╠═══════════════════════════════════════════════════════════╣\n");
+    printf("║ Test             │ Time (ms) │ BW (GB/s)│ %% of peak      ║\n");
+    printf("╠═══════════════════════════════════════════════════════════╣\n");
     
-    // Test 1: Simple copy (baseline)
-    float ms = run_bench(launch_copy, d_A, d_B, N, 256);
+    // Coalesced baseline
+    float ms = time_kernel(run_copy_f32, d_A, d_B, d_C, N, 0);
     float bw = 2.0f * bytes / (ms/1000.0f) / 1e9;
-    printf("║ Copy           │ %9.3f │ %6.0f GB/s │ %5.1f%% of peak  ║\n",
-           ms, bw, 100.0f*bw/peak_bw);
+    printf("║ Copy (float)     │ %8.3f │ %6.0f  │ %5.1f%% of peak  ║\n",
+           ms, bw, 100.0f*bw/peak);
     
-    // Test 2: Vectorized copy (float4)
-    ms = run_bench(launch_copy_vec4, d_A, d_B, N, 256);
+    // Vectorized float4 — usually hits higher peak
+    ms = time_kernel(run_copy_f4, d_A, d_B, d_C, N, 0);
     bw = 2.0f * bytes / (ms/1000.0f) / 1e9;
-    printf("║ Copy (float4)  │ %9.3f │ %6.0f GB/s │ %5.1f%% of peak  ║\n",
-           ms, bw, 100.0f*bw/peak_bw);
+    printf("║ Copy (float4)    │ %8.3f │ %6.0f  │ %5.1f%% of peak  ║\n",
+           ms, bw, 100.0f*bw/peak);
     
-    // Test 3: Strided access (demonstrate uncoalesced)
-    int strides[] = {2, 4, 8, 16};
-    for (int s = 0; s < 4; s++) {
+    // Triad — realistic LLM-style workload
+    ms = time_kernel(run_triad, d_A, d_B, d_C, N, 0);
+    bw = 3.0f * bytes / (ms/1000.0f) / 1e9;   // 3 arrays: read A, read B, write C
+    printf("║ Triad (A+s*B)    │ %8.3f │ %6.0f  │ %5.1f%% of peak  ║\n",
+           ms, bw, 100.0f*bw/peak);
+    
+    // Strided — the punishment
+    int strides[] = {2, 4, 8, 16, 32};
+    for (int s = 0; s < 5; s++) {
         int stride = strides[s];
-        int bs = 256;
-        int N_strided = N;
-        
-        // Warmup
-        strided_copy<<<(N_strided+bs-1)/bs, bs>>>(d_A, d_B, N_strided, stride);
-        cudaDeviceSynchronize();
-        
-        cudaEvent_t start, stop;
-        cudaEventCreate(&start);
-        cudaEventCreate(&stop);
-        cudaEventRecord(start);
-        for (int i = 0; i < 100; i++)
-            strided_copy<<<(N_strided+bs-1)/bs, bs>>>(d_A, d_B, N_strided, stride);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        cudaEventElapsedTime(&ms, start, stop);
-        ms /= 100;
-        
-        // Effective bandwidth = only what's actually used
+        ms = time_kernel(run_stride, d_A, d_B, d_C, N, stride);
         float bw_eff = 2.0f * (N/stride) * sizeof(float) / (ms/1000.0f) / 1e9;
-        printf("║ Stride=%-2d      │ %9.3f │ %6.0f GB/s │ %5.1f%% of peak  ║\n",
-               stride, ms, bw_eff, 100.0f*bw_eff/peak_bw);
-        
-        cudaEventDestroy(start);
-        cudaEventDestroy(stop);
+        printf("║ Stride %2d         │ %8.3f │ %6.0f  │ %5.1f%% of peak  ║\n",
+               stride, ms, bw_eff, 100.0f*bw_eff/peak);
     }
     
-    printf("╠════════════════════════════════════════════════════════════╣\n");
-    printf("║ LLM Implications:                                          ║\n");
-    printf("║   Your GPU can serve LLaMA-7B at ~%.0f tokens/sec          ║\n",
-           peak_bw / 13.4f);
-    printf("║   With INT4 quantization: ~%.0f tokens/sec                 ║\n",
-           peak_bw / 3.4f);
-    printf("║   (assuming memory-bound decode phase)                     ║\n");
-    printf("╚════════════════════════════════════════════════════════════╝\n");
+    printf("╠═══════════════════════════════════════════════════════════╣\n");
+    printf("║ LLM predictions (decode phase, memory-bound):             ║\n");
+    printf("║   Llama-7B FP16 (13.4 GB):  ~%.0f tokens/sec              ║\n",
+           peak / 13.4);
+    printf("║   Llama-7B INT8 (6.7 GB):   ~%.0f tokens/sec              ║\n",
+           peak / 6.7);
+    printf("║   Llama-7B INT4 (3.4 GB):   ~%.0f tokens/sec              ║\n",
+           peak / 3.4);
+    printf("╚═══════════════════════════════════════════════════════════╝\n");
     
     cudaFree(d_A); cudaFree(d_B); cudaFree(d_C);
     return 0;
@@ -923,108 +746,78 @@ int main() {
 
 **Expected output on T4:**
 ```
-╔════════════════════════════════════════════════════════════╗
-║                  BANDWIDTH DASHBOARD                        ║
-╠════════════════════════════════════════════════════════════╣
-║ GPU:              Tesla T4                                  ║
-║ Memory bus:       256-bit GDDR                              ║
-║ Theoretical peak: 320.0 GB/s                                ║
-║ Data size:        256 MB                                    ║
-╠════════════════════════════════════════════════════════════╣
-║ Test           │ Time (ms) │ Bandwidth │ Efficiency       ║
-╠════════════════════════════════════════════════════════════╣
-║ Copy           │    1.800  │   280 GB/s│  87.5% of peak   ║
-║ Copy (float4)  │    1.650  │   310 GB/s│  96.9% of peak   ║ ← vectorized wins
-║ Stride=2       │    1.800  │   140 GB/s│  43.8% of peak   ║
-║ Stride=4       │    1.800  │    70 GB/s│  21.9% of peak   ║
-║ Stride=8       │    1.800  │    35 GB/s│  10.9% of peak   ║
-║ Stride=16      │    1.800  │    17 GB/s│   5.3% of peak   ║
-╠════════════════════════════════════════════════════════════╣
-║ LLM Implications:                                          ║
-║   Your GPU can serve LLaMA-7B at ~24 tokens/sec            ║
-║   With INT4 quantization: ~94 tokens/sec                   ║
-║   (assuming memory-bound decode phase)                     ║
-╚════════════════════════════════════════════════════════════╝
+╔═══════════════════════════════════════════════════════════╗
+║              BANDWIDTH DASHBOARD                           ║
+╠═══════════════════════════════════════════════════════════╣
+║ GPU:              Tesla T4                                ║
+║ Peak bandwidth:   320 GB/s                                ║
+║ Data size:        256 MB                                  ║
+╠═══════════════════════════════════════════════════════════╣
+║ Test             │ Time (ms) │ BW (GB/s)│ % of peak       ║
+╠═══════════════════════════════════════════════════════════╣
+║ Copy (float)     │    1.800  │    284   │ 88.8% of peak   ║
+║ Copy (float4)    │    1.650  │    310   │ 96.9% of peak   ║  ← best!
+║ Triad (A+s*B)    │    2.700  │    285   │ 89.0% of peak   ║
+║ Stride  2        │    1.800  │    142   │ 44.4% of peak   ║
+║ Stride  4        │    1.800  │     71   │ 22.2% of peak   ║
+║ Stride  8        │    1.800  │     36   │ 11.2% of peak   ║
+║ Stride 16        │    1.800  │     18   │  5.6% of peak   ║
+║ Stride 32        │    1.800  │      9   │  2.8% of peak   ║
+╠═══════════════════════════════════════════════════════════╣
+║ LLM predictions (decode phase, memory-bound):             ║
+║   Llama-7B FP16 (13.4 GB):  ~24 tokens/sec                ║
+║   Llama-7B INT8 (6.7 GB):   ~48 tokens/sec                ║
+║   Llama-7B INT4 (3.4 GB):   ~94 tokens/sec                ║
+╚═══════════════════════════════════════════════════════════╝
 ```
 
-**Why this project is valuable:**
-1. You now KNOW your GPU's actual bandwidth ceiling
-2. You can quickly check if a new kernel you write is optimized
-3. You understand why quantization helps inference speed (bw ÷ model_size = tokens/sec)
-4. You've used `float4` vectorization — a key optimization technique
+Look at the stride column. Every doubling of stride halves your effective bandwidth.
+This is the SINGLE most important perf behavior on GPUs. If someone tells you
+their kernel is slow and the GPU is memory-bound, this is where to look first.
+
+And the LLM predictions at the bottom? **Those are theoretically tight.**
+Real vLLM/TensorRT-LLM get within ~10% of these numbers. Quantization to INT4
+gives 4x throughput because you read 4x less data. The whole quantization industry
+is built on this memory-bandwidth reality you just measured.
 
 ---
 
-# PART 9: CONNECTING TO LLMs
+# PART 7: WHAT YOU NOW UNDERSTAND
 
-## Why Today Matters For Every LLM Kernel
+Close this document and try to answer these without looking:
 
-```
-Every LLM operation is memory-bound somewhere:
+1. **Why is HBM faster than DDR5?** (hint: physical structure, wire count)
+2. **What's a cache line and why does size matter?** (hint: spatial locality, warp size)
+3. **What's the difference between coalesced and uncoalesced access?** (hint: lockstep threads)
+4. **Why is `i = blockIdx.x * blockDim.x + threadIdx.x; A[i]` always coalesced?** (hint: warp thread IDs are consecutive)
+5. **Why is LLM inference memory-bound?** (hint: model size vs compute-per-byte)
+6. **How do you measure bandwidth efficiency?** (hint: bytes used / bytes fetched)
+7. **Why does quantization speed up inference?** (hint: smaller model → fewer bytes → less read time)
 
-1. Embedding lookup
-   → Thread i reads row[token_id_i] of embedding table
-   → If token_ids are random, access is UNCOALESCED
-   → Solution: sort by token_id before lookup (token clustering)
-
-2. Attention QK^T
-   → Different heads access different memory regions
-   → Row-major vs column-major layout matters
-   → Flash Attention organizes accesses for coalescing
-
-3. FFN up/down projections
-   → Standard matrix multiply
-   → Well-optimized in cuBLAS (coalesced internally)
-
-4. KV-cache read during decode
-   → Each new token reads all previous K, V
-   → Layout: [num_heads, seq_len, head_dim] vs [seq_len, num_heads, head_dim]
-   → PagedAttention (vLLM) optimizes this layout
-
-5. Weight loading
-   → cuBLAS/cuDNN are coalesced
-   → Custom kernels need manual care
-```
-
-## Why Inference Is Memory-Bound
-
-```
-LLaMA-7B at FP16: 13.4 GB of weights.
-Each token = reads ALL weights once.
-
-On T4 (~280 GB/s measured):
-  13.4 GB / 280 GB/s = 48 ms per token = ~21 tokens/sec
-
-On H100 (~3000 GB/s measured):
-  13.4 GB / 3000 GB/s = 4.5 ms per token = ~224 tokens/sec
-
-QUANTIZATION to INT4: model becomes 3.4 GB.
-  H100: 3.4 / 3000 = 1.1 ms = 909 tokens/sec (4x speedup!)
-
-This is why EVERYONE quantizes for inference.
-The speedup comes from LESS MEMORY READ, not from faster compute.
-```
+If you can answer these, you now understand memory bandwidth deeper than 95% of
+ML engineers who write CUDA code. This knowledge will compound into every kernel
+you see — Flash Attention, cuBLAS, Triton, vLLM — all of them are exercises in
+minimizing memory access and maximizing coalescing.
 
 ---
 
 # CHECKLIST
 
-After Day 1 of Week 2:
-- [ ] Understand global memory (HBM) and why it dominates performance
-- [ ] Know what a cache line is and why it matters (32 bytes L2, 128 bytes L1)
-- [ ] Can explain coalesced vs uncoalesced access with concrete examples
-- [ ] Understand the `i = blockIdx.x * blockDim.x + threadIdx.x` pattern guarantees coalescing
-- [ ] Know memory alignment requirements (4-byte for float, 16-byte for float4)
-- [ ] Can use all `cudaMemcpy` directions (H2D, D2H, D2D)
-- [ ] Can calculate and measure memory bandwidth
-- [ ] Know theoretical peak bandwidth for your GPU
-- [ ] Understand why PCIe is the bottleneck between CPU and GPU
-- [ ] Built the Bandwidth Dashboard mini-project
-- [ ] Can predict LLM inference speed from memory bandwidth
+- [ ] Understand the memory-compute gap and why it defines GPU performance
+- [ ] Know HBM's physical structure and why it's ~30x faster than DDR5
+- [ ] Understand cache lines (L1: 128 bytes, L2: 32 bytes) and their purpose
+- [ ] Can explain coalescing with a specific example (stride 1 vs stride 32)
+- [ ] Know why `blockIdx.x * blockDim.x + threadIdx.x` is the canonical pattern
+- [ ] Can calculate peak bandwidth from memory clock and bus width
+- [ ] Can measure effective bandwidth and compare to peak
+- [ ] Know when to use each cudaMemcpy direction (H2D, D2H, D2D, default)
+- [ ] Understand PCIe as the CPU-GPU bottleneck
+- [ ] Ran all three code exercises and saw coalescing penalty firsthand
+- [ ] Built the Bandwidth Dashboard and read the output intelligently
+- [ ] Can predict LLM inference speed from memory bandwidth measurements
 
-**Tomorrow (Day 2): Shared Memory** — the on-chip SRAM that's 20-100x faster
-than HBM. You'll learn to manually cache data for maximum performance.
-This is the foundation of Flash Attention.
+**Tomorrow (Day 2): Shared Memory** — the on-chip SRAM that sidesteps HBM entirely.
+Where Flash Attention's magic lives.
 
 ---
 
