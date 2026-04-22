@@ -15,10 +15,9 @@ they can use thousands of GPU threads for general computing, not just graphics.
 
 A physicist writes a simple program: "multiply each element of a large array by 2."
 
-```
-One CPU thread would take: 1 second
-1000 GPU threads SHOULD take: 1000x less = 1 ms
-```
+Expected:
+- One CPU thread: **1 second**
+- 1000 GPU threads: should be 1000x less = **1 ms**
 
 He runs it. The GPU takes **100 ms**. 100x faster than CPU — impressive, but
 not 1000x. Where did the other 900x go?
@@ -54,12 +53,11 @@ understand WHY this happens, and HOW to fix it.
 
 ## 1.2 Why Memory Is The Enemy
 
-Here's the dirty secret of modern hardware:
+Here's the dirty secret of modern hardware: **compute has been doubling every
+2 years (Moore's Law), but memory speed only grows ~7% per year**. The gap keeps
+widening.
 
 ```
-Compute has been doubling every 2 years (Moore's Law).
-Memory speed has been growing at ~7% per year.
-
                     THE MEMORY WALL (widening gap)
                     ─────────────────────────────
 
@@ -77,28 +75,30 @@ Memory speed has been growing at ~7% per year.
       1x │─────
          └─────────────────────────────────────────────────
         1980    1990    2000    2010    2020    2024
-
-  Gap in 1980:   compute = memory
-  Gap in 2024:   compute is ~1000x AHEAD of memory speed
-
-This gap is the #1 performance problem in computing.
-Every cache, every prefetcher, every tensor core exists to fight it.
 ```
 
-Wait — GPU ratio LOOKS better. But the GPU also has 10,000+ parallel cores!
+- **1980:** compute ≈ memory speed — balanced system
+- **2024:** compute is ~1000x AHEAD of memory speed — massive imbalance
 
-Effective ratio for LLMs:
-  H100 compute: 990 TFLOPS (FP16 Tensor Core)
-  H100 memory:  3.35 TB/s
-  FLOP per byte: 990,000 / 3,350 = 295 FLOPs per byte
-  
-  To keep the cores fed, you need to do 295 operations per byte read.
-  Vector add does 1 operation per byte.
-  LLM inference does ~1 operation per byte (read weight, use once).
-  
-  You're compute-capability 300x over what your memory can feed.
-  Cores sit idle 299/300 of the time. THIS is why LLMs are memory-bound.
-```
+This gap is the #1 performance problem in computing. Every cache, every
+prefetcher, every Tensor Core exists to fight it.
+
+### The LLM Reality
+
+GPU ratios look better in isolation, but the GPU also has 10,000+ parallel cores
+all demanding data. Do the math for an H100 running Llama:
+
+| Metric | H100 Value |
+|---|---|
+| Compute (FP16 Tensor Core) | 990 TFLOPS |
+| Memory bandwidth | 3.35 TB/s |
+| Ratio | **295 FLOPs per byte** |
+
+To keep the cores fed, you need to do **295 operations per byte** read from memory.
+But LLM inference does **~1 operation per byte** (read weight, multiply, done).
+
+You're compute-capability 300x over what your memory can feed. The cores sit idle
+299 out of 300 cycles. **That's why LLMs are memory-bound.**
 
 Intel learned this lesson in the 90s and invented caches. NVIDIA copied the idea
 but had to solve an even harder problem: caches designed for 8 CPU cores don't
@@ -118,30 +118,30 @@ This was the birth of **memory coalescing**. The GPU doesn't track individual
 thread memory requests. Instead, it looks at all 32 requests from a warp,
 groups them by which cache line they fall in, and issues one transaction per line.
 
-If the threads access consecutive addresses (stride 1):
+**If threads access consecutive addresses (stride 1):**
+
 ```
 Thread 0:  A[0]   (byte 0)
 Thread 1:  A[1]   (byte 4)
 Thread 2:  A[2]   (byte 8)
 ...
 Thread 31: A[31]  (byte 124)
-
-All within bytes 0-127 = ONE 128-byte cache line = ONE transaction.
-32 threads served in the time of 1 transaction.
-THIS is what makes GPUs fast.
 ```
 
-If threads access scattered addresses:
+All within bytes 0-127 = ONE 128-byte cache line = ONE transaction.
+32 threads served in the time of 1 transaction. **THIS is what makes GPUs fast.**
+
+**If threads access scattered addresses:**
+
 ```
 Thread 0:  A[0]      (byte 0)
 Thread 1:  A[1000]   (byte 4000)
 Thread 2:  A[50000]  (byte 200000)
 ...
-
-Each in a different cache line = 32 transactions.
-32x more data fetched than needed.
-Your 2024 H100 suddenly performs like a 2010 GPU.
 ```
+
+Each in a different cache line = 32 transactions. 32x more data fetched than needed.
+**Your 2024 H100 suddenly performs like a 2010 GPU.**
 
 This single architectural choice — coalescing — is why NVIDIA dominates AI.
 CPUs can't do this because their threads run independently on different cores.
@@ -167,10 +167,7 @@ DDR5 peaks at ~100 GB/s. You'd need 600 channels. Physically impossible.
 
 The solution came from Hynix in 2013: **High Bandwidth Memory (HBM)**.
 
-```
-HBM innovation: stop trying to make memory chips FASTER.
-Make them WIDER and shorter.
-```
+**HBM innovation:** stop trying to make memory chips FASTER — make them WIDER and SHORTER.
 
 ### Side-by-side physical comparison
 
@@ -213,24 +210,24 @@ Make them WIDER and shorter.
 
 ### The key insight: wires, not speed
 
-```
-               Wires  × Clock         = Bandwidth
-               ─────    ─────           ─────────
-  DDR5:        128   ×  5 GHz  / 8   =  100 GB/s
-  HBM3:        5120  ×  2.6 GHz / 8  =  3350 GB/s
-               ↑ 40x
-              (that's why HBM wins)
+| Memory | Wires | Clock | Bandwidth |
+|--------|-------|-------|-----------|
+| DDR5   | 128   | 5.0 GHz | **100 GB/s** |
+| HBM3   | 5120  | 2.6 GHz | **3350 GB/s** |
 
-HBM's secret: short distance → wide bus → parallel data transfer.
-Since the memory chips are STACKED ON TOP of each other and bonded to
-the GPU package, the wires can be incredibly short and numerous.
+HBM wins despite having a SLOWER clock — it makes up the difference with **40x more
+wires in parallel**.
 
-DDR5 memory on a stick 10cm away from CPU can't have 5000 wires —
-physical routing limits it to ~128.
-```
+**HBM's secret:** short distance → wide bus → parallel data transfer. Since the memory
+chips are stacked on top of each other and bonded to the GPU package, the wires can
+be incredibly short and numerous.
 
-This is why GPU memory is stuck on the card — you CAN'T upgrade GPU RAM like you can
-upgrade DDR5 in your laptop. The HBM chips are physically bonded to the GPU package.
+DDR5 memory on a stick 10cm away from the CPU can't have 5000 wires — physical
+routing limits it to ~128.
+
+This is also why GPU memory is stuck on the card — you CAN'T upgrade GPU RAM like
+you can upgrade DDR5 in your laptop. The HBM chips are physically bonded to the
+GPU package.
 
 ## 2.2 The Cache Hierarchy: Making HBM Bearable
 
@@ -263,17 +260,19 @@ So NVIDIA added multiple layers of caches:
                     │      │    (HBM)     │              ▪ 16 GB (T4)
                     ▼      └──────────────┘              ▪ Where LLM weights live
                     SLOWEST ────────  LARGEST
-
-          WHAT LIVES WHERE FOR AN LLM (e.g., Llama-7B, 13.4 GB):
-          ──────────────────────────────────────────────────────
-          Registers:    current token's activations (a few floats)
-          Shared mem:   tile of weights being multiplied RIGHT NOW
-          L1/L2:        recent attention activations, hopefully cached
-          HBM:          ALL 13.4 GB of weights + KV-cache
-                        ↑ this is what you read every token
-                          NO cache can hold it (too big).
-                          Memory bandwidth determines your tokens/sec.
 ```
+
+### What lives where for an LLM (Llama-7B, 13.4 GB)
+
+| Level | Holds |
+|-------|-------|
+| **Registers** | Current token's activations (a few floats per thread) |
+| **Shared memory** | Tile of weights being multiplied RIGHT NOW |
+| **L1 / L2 cache** | Recent attention activations, hopefully cached |
+| **HBM (global)** | ALL 13.4 GB of weights + KV-cache |
+
+**The killer fact:** NO cache can hold the full model (too big). Every token must
+read all 13.4 GB from HBM. Memory bandwidth is what determines your tokens/sec.
 
 Reading a float from HBM vs from registers: **500x slower**. So caches matter ENORMOUSLY.
 
@@ -288,6 +287,8 @@ It reads an entire **cache line** containing that address.
 
 ### Visual: What a cache line looks like
 
+Global memory is divided into fixed-size chunks called cache lines:
+
 ```
   Address:  0         128       256       384       512   ...
             ▼         ▼         ▼         ▼         ▼
@@ -295,49 +296,29 @@ It reads an entire **cache line** containing that address.
   Memory:   │LINE 0   │LINE 1   │LINE 2   │LINE 3   │ ...
             │128 bytes│128 bytes│128 bytes│128 bytes│
             └─────────┴─────────┴─────────┴─────────┴────
+```
 
-  Each L1 cache line holds 32 consecutive floats:
-  
+Each L1 cache line holds 32 consecutive floats:
+
+```
             ┌──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┐
   LINE 0:   │f0│f1│f2│f3│f4│f5│f6│f7│f8│f9│...........│f31│
             └──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┘
             byte 0                                    byte 124
-
-  Key rule:  You want 1 byte? You pay for 128 bytes.
-             You want 32 consecutive bytes? You still pay for 128.
-             You want bytes from 4 different lines? You pay for 4×128 = 512.
 ```
+
+**The key rule:**
+- You want 1 byte? You pay for 128 bytes.
+- You want 32 consecutive bytes? You still pay for 128.
+- You want bytes from 4 different lines? You pay for 4 × 128 = 512.
 
 ### Why different sizes at different cache levels?
 
-```
-  ┌────────────────────────────────────┐
-  │      L1 CACHE (per-SM)              │
-  │      Line size: 128 bytes           │   Matches warp size perfectly:
-  │      Total:     228 KB              │   32 threads × 4 bytes = 128!
-  │      Design:    BIG chunks          │
-  │      Why:       Warps cause spatial │
-  │                 locality → big line │
-  │                 = fewer transactions│
-  └───────────────┬────────────────────┘
-                  │
-                  ▼ (if miss)
-  ┌────────────────────────────────────┐
-  │      L2 CACHE (shared)              │
-  │      Line size: 32 bytes            │   MANY SMs make tiny requests
-  │      Total:     50 MB               │   at different addresses.
-  │      Design:    SMALL chunks        │
-  │      Why:       Flexibility for     │
-  │                 random access       │
-  │                 patterns across SMs │
-  └───────────────┬────────────────────┘
-                  │
-                  ▼ (if miss)
-  ┌────────────────────────────────────┐
-  │      HBM (global memory)            │
-  │      ~80 GB, slow but massive       │
-  └────────────────────────────────────┘
-```
+| Cache | Line size | Total | Design philosophy |
+|-------|-----------|-------|-------------------|
+| **L1** (per-SM) | 128 bytes | 228 KB | BIG chunks — matches warp size (32 threads × 4 bytes = 128). Spatial locality from warps → bigger line = fewer transactions. |
+| **L2** (shared) | 32 bytes | 50 MB | SMALL chunks — many SMs make tiny requests at random addresses. Small line = flexibility, less waste. |
+| **HBM** (global) | — | 80 GB | The source. Slow but massive. |
 
 The 128-byte L1 line size is not arbitrary. It's **exactly the size of a warp's
 coalesced float access**: 32 threads × 4 bytes each = 128 bytes. That's NVIDIA's
@@ -390,24 +371,24 @@ Memory: │   CACHE LINE 0 (128B)│   CACHE LINE 1 (128B)│  ...
          ↑
          │  All 32 threads' data lives HERE.
          │  GPU says: "I'll grab this whole line — one transaction."
-         
-  Result:
-    Transactions:      1  (one 128-byte fetch)
-    Bytes fetched:   128
-    Bytes used:      128  (32 threads × 4 bytes)
-    Efficiency:      100% ✓
-    Time:            1x (baseline)
 ```
 
+| Metric | Value |
+|--------|-------|
+| Transactions | **1** (one 128-byte fetch) |
+| Bytes fetched | 128 |
+| Bytes used | 128 (32 threads × 4 bytes) |
+| Efficiency | **100%** ✓ |
+| Time | 1x (baseline) |
+
 ### Pattern B: Stride 32 (UNCOALESCED — BAD)
+
 ```c
 int i = blockIdx.x * blockDim.x + threadIdx.x;
 float x = A[i * 32];  // stride of 32
 ```
 
 ```
-VISUAL: WHERE EACH THREAD'S DATA LIVES (Pattern B — Stride 32)
-
 Bytes:  0        128       256       384  ...  3968
         │         │         │         │        │
         ▼         ▼         ▼         ▼        ▼
@@ -422,19 +403,21 @@ Memory: │ LINE 0  │ LINE 1  │ LINE 2  │        │ LINE 31 │
          
          127       127       127                127
          WASTED    WASTED    WASTED             WASTED
-
-  Result:
-    Transactions:    32  (one per thread — each in different line!)
-    Bytes fetched: 4096  (32 × 128)
-    Bytes used:    128  (same as before)
-    Efficiency:     3%  ✗
-    Time:          32x slower (in effective bandwidth terms)
 ```
+
+Each thread hits a DIFFERENT cache line!
+
+| Metric | Value |
+|--------|-------|
+| Transactions | **32** (one per thread!) |
+| Bytes fetched | 4,096 (32 × 128) |
+| Bytes used | 128 (same as before) |
+| Efficiency | **3%** ✗ |
+| Time | 32x slower (in effective bandwidth) |
 
 ### Pattern C: Stride 2 (half-bad)
-```
-VISUAL: WHERE EACH THREAD'S DATA LIVES (Pattern C — Stride 2)
 
+```
 Bytes:   0    32   64   96   128  160  192  224
          │    │    │    │    │    │    │    │
          ▼    ▼    ▼    ▼    ▼    ▼    ▼    ▼
@@ -444,33 +427,29 @@ Memory:  │   CACHE LINE 0       │   CACHE LINE 1       │
          │ ░  ░  ░  ░   ... ░  │ ░  ░  ░   ...  ░     │
          └──────────────────────┴──────────────────────┘
           16 threads in line 0    16 threads in line 1
-          
-  Result:
-    Transactions:     2  (only 2 different lines touched)
-    Bytes fetched:  256  (2 × 128)
-    Bytes used:     128
-    Efficiency:      50%
-    Time:            2x slower
 ```
 
-### The stride penalty — visual summary
+| Metric | Value |
+|--------|-------|
+| Transactions | **2** (only 2 different lines) |
+| Bytes fetched | 256 (2 × 128) |
+| Bytes used | 128 |
+| Efficiency | **50%** |
+| Time | 2x slower |
 
-```
-Stride:    1       2       4       8      16      32
-           │       │       │       │       │       │
-           ▼       ▼       ▼       ▼       ▼       ▼
-Lines:    [1]    [1|1]  [1|1|1|1] [×8]  [×16]  [×32]
-          1 txn  2 txns  4 txns   8     16     32
+### The stride penalty — summary table
 
-                              ┌────────────────────
-Efficiency:  100%   50%   25%  12%   6%    3%
+| Stride | Cache lines touched | Transactions | Efficiency |
+|--------|---------------------|--------------|------------|
+| 1 | 1 | 1 | **100%** |
+| 2 | 2 | 2 | 50% |
+| 4 | 4 | 4 | 25% |
+| 8 | 8 | 8 | 12% |
+| 16 | 16 | 16 | 6% |
+| 32 | 32 | 32 | **3%** |
 
-                                           ╲
-                                            ╲  dropoff halves
-                                             ╲ with each stride
-                                              ╲ doubling
-                                               ╲
-```
+Each stride doubling halves your effective bandwidth. This is THE performance
+behavior to remember.
 
 ## 3.3 Why The Formula `i = blockIdx.x * blockDim.x + threadIdx.x` Matters
 
@@ -498,6 +477,8 @@ Matrix multiply is THE LLM operation. How you index matters enormously.
 
 ### Row-major memory layout
 
+A 3×4 matrix on paper vs. in memory:
+
 ```
 A 3×4 matrix on paper:                In memory (1D, row-major):
                                       
@@ -507,64 +488,63 @@ row 0│  1    2    3    4  │            ┌──┬──┬──┬──�
 row 1│  5    6    7    8  │            │ 1│ 2│ 3│ 4│ 5│ 6│ 7│ 8│ 9│10│11│12│
 row 2│  9   10   11   12  │            └──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┘
      └────────────────────┘            └── row 0 ──┘└── row 1 ──┘└── row 2 ──┘
-                                          (contiguous) (contiguous) (contiguous)
-
-Formula: A[row][col] lives at byte (row × cols + col) × 4
 ```
+
+**Formula:** `A[row][col]` lives at byte `(row × cols + col) × 4`
 
 ### Access pattern 1 — ROW-wise (COALESCED ✓)
 
+All threads read different COLS of the SAME ROW:
+
 ```
-All threads read DIFFERENT COLS of the SAME ROW:
-  Thread 0: A[0][0] = byte  0
-  Thread 1: A[0][1] = byte  4      ← consecutive in memory
-  Thread 2: A[0][2] = byte  8      ← consecutive
-  Thread 3: A[0][3] = byte 12      ← consecutive
-  
-  Memory picture:
-  ┌──┬──┬──┬──┐───────────────
-  │T0│T1│T2│T3│←── all in 1 cache line
-  └──┴──┴──┴──┘───────────────
-  
-  ONE transaction, full efficiency. ✓
+Thread 0: A[0][0] = byte  0
+Thread 1: A[0][1] = byte  4      ← consecutive in memory
+Thread 2: A[0][2] = byte  8      ← consecutive
+Thread 3: A[0][3] = byte 12      ← consecutive
 ```
+
+```
+┌──┬──┬──┬──┐───────────────
+│T0│T1│T2│T3│←── all in 1 cache line
+└──┴──┴──┴──┘───────────────
+```
+
+**ONE transaction, full efficiency.** ✓
 
 ### Access pattern 2 — COLUMN-wise (UNCOALESCED ✗)
 
+All threads read the SAME COL of different ROWS:
+
 ```
-All threads read SAME COL of DIFFERENT ROWS:
-  Thread 0: A[0][0] = byte  0
-  Thread 1: A[1][0] = byte 16      ← 16 bytes apart!
-  Thread 2: A[2][0] = byte 32      ← 16 bytes apart!
-  
-  Memory picture:
-  ┌──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┐
-  │T0│░░│░░│░░│T1│░░│░░│░░│T2│░░│░░│░░│  ← threads SCATTERED
-  └──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┘     across multiple lines
-  
-  Multiple transactions, wasted bandwidth. ✗
+Thread 0: A[0][0] = byte  0
+Thread 1: A[1][0] = byte 16      ← 16 bytes apart!
+Thread 2: A[2][0] = byte 32      ← 16 bytes apart!
 ```
+
+```
+┌──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┐
+│T0│░░│░░│░░│T1│░░│░░│░░│T2│░░│░░│░░│  ← threads SCATTERED
+└──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┘     across multiple lines
+```
+
+**Multiple transactions, wasted bandwidth.** ✗
 
 ### Why naive matrix multiply is slow
 
-```
-    C = A × B          standard CPU algorithm:
-    
-    for each output C[i][j]:
-        for k in 0..K:
-            C[i][j] += A[i][k] × B[k][j]
-                         ↑        ↑
-                         │        │
-                         │        └── B[k][j]: as k grows, we jump by cols*4 bytes
-                         │            This is COLUMN-WISE access → UNCOALESCED!
-                         │
-                         └── A[i][k]: as k grows, consecutive bytes
-                             This is ROW-WISE → COALESCED ✓
+The standard CPU-style algorithm:
 
-  Result: even though you touch every element of B once, your memory
-  access pattern is terrible. Naive matmul hits maybe 20 GB/s on a T4
-  that peaks at 320 GB/s. 10-30x slowdown vs tiled version.
+```c
+for each output C[i][j]:
+    for k in 0..K:
+        C[i][j] += A[i][k] * B[k][j];
 ```
+
+- `A[i][k]`: as k grows, bytes are consecutive → **row-wise → COALESCED** ✓
+- `B[k][j]`: as k grows, bytes jump by `cols × 4` → **column-wise → UNCOALESCED** ✗
+
+Even though you touch every element of B exactly once, the access pattern is
+terrible. Naive matmul hits maybe 20 GB/s on a T4 that peaks at 320 GB/s —
+a 10-30x slowdown vs a tiled version.
 
 Flash Attention, cuBLAS, and every fast kernel are designed to make every memory
 access coalesced. When you implement tiled matmul (this Saturday) and attention
@@ -588,9 +568,9 @@ PCIe is still the bottleneck between CPU and GPU.
 
 ## 4.2 The Bandwidth Reality
 
-```
-THE BANDWIDTH TRIANGLE — where everything is slow except HBM:
+Three types of memory bandwidth in a CPU-GPU system, with enormous differences:
 
+```
    ┌───────────────────────────┐         ┌──────────────────────────┐
    │         CPU               │         │           GPU             │
    │                           │         │                           │
@@ -607,39 +587,28 @@ THE BANDWIDTH TRIANGLE — where everything is slow except HBM:
    │   └──────────────────┘    │         │    └──────────────────┘   │
    │                           │         │                           │
    └───────────────────────────┘         └──────────────────────────┘
-   
-   Relative bandwidths:
-     PCIe:    ██                         25 GB/s   ← 130x slower than HBM
-     DDR5:    ████████                  100 GB/s
-     HBM3:    ████████████████████████ 3350 GB/s
 ```
+
+Relative bandwidth comparison:
+
+| Bus | Bandwidth | Relative |
+|-----|-----------|----------|
+| PCIe 4.0 x16 (CPU ↔ GPU) | 25 GB/s | **1x** (slowest — the bottleneck) |
+| DDR5 (CPU RAM) | 100 GB/s | 4x |
+| HBM3 (GPU memory) | 3,350 GB/s | **134x** — massive advantage |
 
 ### Why this kills performance if you're not careful
 
-```
-Moving 14 GB (Llama-7B weights) from CPU → GPU:
-  
-  ┌────────────────────────────────────────────────────────┐
-  │ PCIe transfer: 14 GB at 25 GB/s                        │
-  │                                                         │
-  │   ████████████████████████████████████████ 560 ms      │
-  │                                                         │
-  └────────────────────────────────────────────────────────┘
-  
-Running the same model once on GPU:
-  
-  ┌────────────────────────────────────────────────────────┐
-  │ HBM read: 14 GB at 3350 GB/s                           │
-  │                                                         │
-  │   █ 4.2 ms                                              │
-  │                                                         │
-  └────────────────────────────────────────────────────────┘
-  
-  Ratio:  560 / 4.2 = 133x faster on GPU once data is there.
+**Moving 14 GB (Llama-7B weights) from CPU → GPU:**
 
-Implication: one CPU→GPU copy = running the model 133 times.
-If you copy every token, you're throwing away 99% of your GPU's speed.
-```
+`14 GB ÷ 25 GB/s = 560 ms`
+
+**Running the same model once on GPU (reading weights from HBM):**
+
+`14 GB ÷ 3,350 GB/s = 4.2 ms`
+
+**One CPU→GPU copy costs as much as running the model 133 times.** If you copy
+every token, you're throwing away 99% of your GPU's speed.
 
 This is why when you call `.to('cuda')` in PyTorch, it's slow the first time and
 fast forever after (the data stays on GPU). And why `model.cpu().cuda()` in a loop
