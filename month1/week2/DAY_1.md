@@ -27,6 +27,23 @@ He profiles. The GPU cores are idle **99% of the time**. Why?
 
 **Answer: they're waiting for data.**
 
+```
+  What he expected:                 What actually happened:
+  ────────────────                  ──────────────────────
+  ┌──────────────────┐              ┌──┬──────────────────┐
+  │ ALL 1000 cores   │              │C │                   │
+  │ ALL working      │              │O │  IDLE             │
+  │ ALL the time     │              │M │  Waiting for      │
+  │                  │              │P │  memory to        │
+  │   ████████████   │              │U │  deliver data...  │
+  │   ████████████   │              │T │                   │
+  │   ████████████   │              │E │                   │
+  │                  │              │  │                   │
+  └──────────────────┘              └──┴──────────────────┘
+   1 ms, 1000x speedup              100 ms, only 100x speedup
+                                     Compute = 1%, Waiting = 99%
+```
+
 The compute was done in 1 ms. The remaining 99 ms was spent **moving numbers
 from memory to the cores**. Even though the GPU had thousands of arithmetic units,
 they were starving.
@@ -43,10 +60,30 @@ Here's the dirty secret of modern hardware:
 Compute has been doubling every 2 years (Moore's Law).
 Memory speed has been growing at ~7% per year.
 
-Result — widening gap:
-  1980:   CPU ~1 MFLOP,  RAM ~1 MB/s bandwidth  → ratio = 1
-  2000:   CPU ~1 GFLOP,  RAM ~1 GB/s            → ratio = 1
-  2024:   GPU ~1 TFLOP,  HBM ~3 TB/s            → ratio = 0.3
+                    THE MEMORY WALL (widening gap)
+                    ─────────────────────────────
+
+  10000x │                                              ● Compute
+         │                                          ╱
+         │                                       ╱
+   1000x │                                   ╱
+         │                              ╱
+         │                          ╱
+    100x │                      ╱
+         │                  ╱
+         │              ╱  ─────────────────────   Memory
+     10x │          ╱ ─────────────
+         │    ╱ ─────
+      1x │─────
+         └─────────────────────────────────────────────────
+        1980    1990    2000    2010    2020    2024
+
+  Gap in 1980:   compute = memory
+  Gap in 2024:   compute is ~1000x AHEAD of memory speed
+
+This gap is the #1 performance problem in computing.
+Every cache, every prefetcher, every tensor core exists to fight it.
+```
 
 Wait — GPU ratio LOOKS better. But the GPU also has 10,000+ parallel cores!
 
@@ -133,15 +170,63 @@ The solution came from Hynix in 2013: **High Bandwidth Memory (HBM)**.
 ```
 HBM innovation: stop trying to make memory chips FASTER.
 Make them WIDER and shorter.
+```
 
-DDR5:   Memory chips on sticks, far from CPU.
-        Long wires → slow, few channels possible.
-        Bandwidth: ~100 GB/s.
+### Side-by-side physical comparison
 
-HBM:    Memory chips STACKED VERTICALLY next to GPU die.
-        Thousands of TINY wires (TSVs = Through-Silicon Vias).
-        Very short distance → fast.
-        Bandwidth: 3,350 GB/s (H100) — 33x faster than DDR5.
+```
+  CPU SYSTEM (DDR5):                      GPU SYSTEM (HBM3):
+  ──────────────────                       ───────────────────
+
+   ┌──────────────┐                       ┌──────────┐ ┌──────────┐
+   │     CPU      │                       │   HBM    │ │   HBM    │
+   │              │                       │  stack   │ │  stack   │
+   │              │                       │ ┌──────┐ │ │ ┌──────┐ │
+   │              │                       │ │ die4 │ │ │ │ die4 │ │  ← stacked
+   │              │                       │ ├──────┤ │ │ ├──────┤ │    vertically
+   └──┬──┬──┬──┬──┘                       │ │ die3 │ │ │ │ die3 │ │
+      │  │  │  │                          │ ├──────┤ │ │ ├──────┤ │
+      │  │  │  │  (4 long wires           │ │ die2 │ │ │ │ die2 │ │
+      │  │  │  │   per channel)           │ ├──────┤ │ │ ├──────┤ │
+      │  │  │  │                          │ │ die1 │ │ │ │ die1 │ │
+   ┌──┴──┴──┴──┴──┐                       │ └──┬───┘ │ │ └──┬───┘ │
+   │              │                       └────┼─────┘ └────┼─────┘
+   │  DDR5 DIMM   │                            │            │
+   │  (separate   │                            │ (1024      │
+   │   card)      │                            │  TINY TSVs │
+   │              │                            │  per stack)│
+   └──────────────┘                            ▼            ▼
+                                          ┌───────────────────────┐
+   128 wires total                        │                       │
+   ~5 GHz × 128 / 8 = 100 GB/s            │      GPU die         │
+                                          │  (compute happens    │
+                                          │   RIGHT NEXT to      │
+                                          │   memory)            │
+                                          │                       │
+                                          └───────────────────────┘
+
+                                          5 HBM stacks × 1024 wires each
+                                           = 5120 wires TOTAL
+                                          ~2.6 GHz × 5120 / 8 = 3350 GB/s
+                                          (33x more bandwidth than DDR5)
+```
+
+### The key insight: wires, not speed
+
+```
+               Wires  × Clock         = Bandwidth
+               ─────    ─────           ─────────
+  DDR5:        128   ×  5 GHz  / 8   =  100 GB/s
+  HBM3:        5120  ×  2.6 GHz / 8  =  3350 GB/s
+               ↑ 40x
+              (that's why HBM wins)
+
+HBM's secret: short distance → wide bus → parallel data transfer.
+Since the memory chips are STACKED ON TOP of each other and bonded to
+the GPU package, the wires can be incredibly short and numerous.
+
+DDR5 memory on a stick 10cm away from CPU can't have 5000 wires —
+physical routing limits it to ~128.
 ```
 
 This is why GPU memory is stuck on the card — you CAN'T upgrade GPU RAM like you can
@@ -153,15 +238,41 @@ Even at 3.35 TB/s, HBM is **slow** compared to what GPU cores can consume.
 So NVIDIA added multiple layers of caches:
 
 ```
-                             ACCESS TIME    SIZE            PURPOSE
-─────────────────────────────────────────────────────────────────────
-Registers                    1 cycle        256 KB/SM        Thread-local
-  ↓ (spill if too many)
-Shared Memory / L1 Cache     ~20 cycles     228 KB/SM        Block-shared
-  ↓ (if miss)
-L2 Cache                     ~200 cycles    50 MB (H100)     All SMs
-  ↓ (if miss)
-Global Memory (HBM)          ~400-600 cyc   80 GB            Everyone
+                        THE GPU MEMORY PYRAMID
+                        ──────────────────────
+
+                    ▲ FASTEST  ────────  SMALLEST
+                    │
+                    │      ┌──────────────┐
+                    │      │  REGISTERS   │     1 cycle  ▪ 256 KB / SM
+                    │      │ per-thread   │     ↕ 100x   ▪ Private to 1 thread
+                    │      └──────┬───────┘
+                    │             │ spills if too many
+                    │      ┌──────▼───────┐
+                    │      │SHARED / L1   │    ~20 cyc   ▪ 228 KB / SM
+                    │      │ per-block    │     ↕ 10x    ▪ Shared in block
+                    │      └──────┬───────┘
+                    │             │ miss
+                    │      ┌──────▼───────┐
+                    │      │   L2 CACHE   │   ~200 cyc   ▪ 50 MB total (H100)
+                    │      │ all-SM shared│     ↕ 2-3x   ▪ 4 MB (T4)
+                    │      └──────┬───────┘
+                    │             │ miss
+                    │      ┌──────▼───────┐
+                    │      │GLOBAL MEMORY │   ~500 cyc   ▪ 80 GB (H100)
+                    │      │    (HBM)     │              ▪ 16 GB (T4)
+                    ▼      └──────────────┘              ▪ Where LLM weights live
+                    SLOWEST ────────  LARGEST
+
+          WHAT LIVES WHERE FOR AN LLM (e.g., Llama-7B, 13.4 GB):
+          ──────────────────────────────────────────────────────
+          Registers:    current token's activations (a few floats)
+          Shared mem:   tile of weights being multiplied RIGHT NOW
+          L1/L2:        recent attention activations, hopefully cached
+          HBM:          ALL 13.4 GB of weights + KV-cache
+                        ↑ this is what you read every token
+                          NO cache can hold it (too big).
+                          Memory bandwidth determines your tokens/sec.
 ```
 
 Reading a float from HBM vs from registers: **500x slower**. So caches matter ENORMOUSLY.
@@ -175,13 +286,57 @@ caching, memory bandwidth is the bottleneck.
 Your program says "read 4 bytes from address 100." The GPU doesn't actually read 4 bytes.
 It reads an entire **cache line** containing that address.
 
-```
-L2 cache line: 32 bytes (bytes 96 to 127, say)
-L1 cache line: 128 bytes (bytes 0 to 127)
+### Visual: What a cache line looks like
 
-Why different sizes?
-  L2 is SHARED across all SMs. Many tiny requests. Smaller chunks = less waste.
-  L1 is DEDICATED to one SM. Big chunks match warp size (32 × 4 = 128 bytes).
+```
+  Address:  0         128       256       384       512   ...
+            ▼         ▼         ▼         ▼         ▼
+            ┌─────────┬─────────┬─────────┬─────────┬────
+  Memory:   │LINE 0   │LINE 1   │LINE 2   │LINE 3   │ ...
+            │128 bytes│128 bytes│128 bytes│128 bytes│
+            └─────────┴─────────┴─────────┴─────────┴────
+
+  Each L1 cache line holds 32 consecutive floats:
+  
+            ┌──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┐
+  LINE 0:   │f0│f1│f2│f3│f4│f5│f6│f7│f8│f9│...........│f31│
+            └──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┘
+            byte 0                                    byte 124
+
+  Key rule:  You want 1 byte? You pay for 128 bytes.
+             You want 32 consecutive bytes? You still pay for 128.
+             You want bytes from 4 different lines? You pay for 4×128 = 512.
+```
+
+### Why different sizes at different cache levels?
+
+```
+  ┌────────────────────────────────────┐
+  │      L1 CACHE (per-SM)              │
+  │      Line size: 128 bytes           │   Matches warp size perfectly:
+  │      Total:     228 KB              │   32 threads × 4 bytes = 128!
+  │      Design:    BIG chunks          │
+  │      Why:       Warps cause spatial │
+  │                 locality → big line │
+  │                 = fewer transactions│
+  └───────────────┬────────────────────┘
+                  │
+                  ▼ (if miss)
+  ┌────────────────────────────────────┐
+  │      L2 CACHE (shared)              │
+  │      Line size: 32 bytes            │   MANY SMs make tiny requests
+  │      Total:     50 MB               │   at different addresses.
+  │      Design:    SMALL chunks        │
+  │      Why:       Flexibility for     │
+  │                 random access       │
+  │                 patterns across SMs │
+  └───────────────┬────────────────────┘
+                  │
+                  ▼ (if miss)
+  ┌────────────────────────────────────┐
+  │      HBM (global memory)            │
+  │      ~80 GB, slow but massive       │
+  └────────────────────────────────────┘
 ```
 
 The 128-byte L1 line size is not arbitrary. It's **exactly the size of a warp's
@@ -221,15 +376,27 @@ float x = A[i];  // each thread reads A[thread_id]
 ```
 
 ```
-Warp 0 (threads 0-31):
-  Thread 0:  A[0]  → byte 0
-  Thread 1:  A[1]  → byte 4
-  Thread 2:  A[2]  → byte 8
-  ...
-  Thread 31: A[31] → byte 124
+VISUAL: WHERE EACH THREAD'S DATA LIVES (Pattern A — Coalesced)
 
-All 32 addresses span bytes 0-127 = ONE 128-byte L1 line.
-→ 1 transaction. 100% efficient.
+Bytes:  0    32   64   96   128   ...
+        │    │    │    │    │
+        ▼    ▼    ▼    ▼    ▼
+        ┌──────────────────────┬──────────────────────┐
+Memory: │   CACHE LINE 0 (128B)│   CACHE LINE 1 (128B)│  ...
+        │ ┌──┬──┬──┬──┬ ... ┬──┤ ┌──┬──┬──┬ ...       │
+        │ │T0│T1│T2│T3│     │T31│ │  │  │  │           │
+        │ └──┴──┴──┴──┴ ... ┴──┘ └──┴──┴──┴ ...       │
+        └──────────────────────┴──────────────────────┘
+         ↑
+         │  All 32 threads' data lives HERE.
+         │  GPU says: "I'll grab this whole line — one transaction."
+         
+  Result:
+    Transactions:      1  (one 128-byte fetch)
+    Bytes fetched:   128
+    Bytes used:      128  (32 threads × 4 bytes)
+    Efficiency:      100% ✓
+    Time:            1x (baseline)
 ```
 
 ### Pattern B: Stride 32 (UNCOALESCED — BAD)
@@ -239,29 +406,70 @@ float x = A[i * 32];  // stride of 32
 ```
 
 ```
-Warp 0:
-  Thread 0:  A[0]   → byte 0      → line 0
-  Thread 1:  A[32]  → byte 128    → line 1  ← different line!
-  Thread 2:  A[64]  → byte 256    → line 2
-  ...
-  Thread 31: A[992] → byte 3968   → line 31
+VISUAL: WHERE EACH THREAD'S DATA LIVES (Pattern B — Stride 32)
 
-32 different cache lines touched.
-→ 32 transactions. Only 4 bytes used per 128 bytes fetched.
-→ 32x wasted bandwidth = kernel ~32x slower.
+Bytes:  0        128       256       384  ...  3968
+        │         │         │         │        │
+        ▼         ▼         ▼         ▼        ▼
+        ┌─────────┬─────────┬─────────┬───── ──┬─────────┐
+Memory: │ LINE 0  │ LINE 1  │ LINE 2  │        │ LINE 31 │
+        │[T0]░░░░░│[T1]░░░░░│[T2]░░░░░│  ...   │[T31]░░░░│
+        └─────────┴─────────┴─────────┴────────┴─────────┘
+         ▲         ▲         ▲                  ▲
+         │         │         │                  │
+         1 byte    1 byte    1 byte             1 byte
+         USED      USED      USED               USED
+         
+         127       127       127                127
+         WASTED    WASTED    WASTED             WASTED
+
+  Result:
+    Transactions:    32  (one per thread — each in different line!)
+    Bytes fetched: 4096  (32 × 128)
+    Bytes used:    128  (same as before)
+    Efficiency:     3%  ✗
+    Time:          32x slower (in effective bandwidth terms)
 ```
 
 ### Pattern C: Stride 2 (half-bad)
 ```
-Thread 0:  A[0]   → byte 0      → line 0
-Thread 1:  A[2]   → byte 8      → line 0   ← same line
-Thread 2:  A[4]   → byte 16     → line 0
-...
-Thread 16: A[32]  → byte 128    → line 1   ← new line
-Thread 31: A[62]  → byte 248    → line 1
+VISUAL: WHERE EACH THREAD'S DATA LIVES (Pattern C — Stride 2)
 
-Only 2 cache lines touched.
-→ 2 transactions. 50% efficient. Kernel ~2x slower than perfect.
+Bytes:   0    32   64   96   128  160  192  224
+         │    │    │    │    │    │    │    │
+         ▼    ▼    ▼    ▼    ▼    ▼    ▼    ▼
+         ┌──────────────────────┬──────────────────────┐
+Memory:  │   CACHE LINE 0       │   CACHE LINE 1       │
+         │T0  T1  T2  T3 ...T15│T16 T17 T18 ... T31   │
+         │ ░  ░  ░  ░   ... ░  │ ░  ░  ░   ...  ░     │
+         └──────────────────────┴──────────────────────┘
+          16 threads in line 0    16 threads in line 1
+          
+  Result:
+    Transactions:     2  (only 2 different lines touched)
+    Bytes fetched:  256  (2 × 128)
+    Bytes used:     128
+    Efficiency:      50%
+    Time:            2x slower
+```
+
+### The stride penalty — visual summary
+
+```
+Stride:    1       2       4       8      16      32
+           │       │       │       │       │       │
+           ▼       ▼       ▼       ▼       ▼       ▼
+Lines:    [1]    [1|1]  [1|1|1|1] [×8]  [×16]  [×32]
+          1 txn  2 txns  4 txns   8     16     32
+
+                              ┌────────────────────
+Efficiency:  100%   50%   25%  12%   6%    3%
+
+                                           ╲
+                                            ╲  dropoff halves
+                                             ╲ with each stride
+                                              ╲ doubling
+                                               ╲
 ```
 
 ## 3.3 Why The Formula `i = blockIdx.x * blockDim.x + threadIdx.x` Matters
@@ -288,29 +496,79 @@ have a very specific reason.
 
 Matrix multiply is THE LLM operation. How you index matters enormously.
 
+### Row-major memory layout
+
 ```
-A matrix A[rows × cols] stored row-major in memory:
-  A[0][0], A[0][1], A[0][2], ..., A[0][cols-1],
-  A[1][0], A[1][1], ..., A[1][cols-1],
-  ...
+A 3×4 matrix on paper:                In memory (1D, row-major):
+                                      
+     col:  0    1    2    3            byte addresses:
+     ┌────────────────────┐            0  4  8 12 16 20 24 28 32 36 40 44
+row 0│  1    2    3    4  │            ┌──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┐
+row 1│  5    6    7    8  │            │ 1│ 2│ 3│ 4│ 5│ 6│ 7│ 8│ 9│10│11│12│
+row 2│  9   10   11   12  │            └──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┘
+     └────────────────────┘            └── row 0 ──┘└── row 1 ──┘└── row 2 ──┘
+                                          (contiguous) (contiguous) (contiguous)
 
-Access pattern 1 — ROW-MAJOR (COALESCED):
-  Thread t reads A[row][t] — consecutive memory → FAST
+Formula: A[row][col] lives at byte (row × cols + col) × 4
+```
 
-Access pattern 2 — COLUMN-MAJOR (UNCOALESCED):  
-  Thread t reads A[t][col] — stride = cols → SLOW
+### Access pattern 1 — ROW-wise (COALESCED ✓)
 
-Naive matrix multiply (CPU-style):
-  for each output element C[i][j]:
-    for k: sum += A[i][k] * B[k][j]
+```
+All threads read DIFFERENT COLS of the SAME ROW:
+  Thread 0: A[0][0] = byte  0
+  Thread 1: A[0][1] = byte  4      ← consecutive in memory
+  Thread 2: A[0][2] = byte  8      ← consecutive
+  Thread 3: A[0][3] = byte 12      ← consecutive
   
-  B[k][j] access is column-major within the inner loop → UNCOALESCED!
-  This is why naive matmul is 10-30x slower than tiled matmul.
+  Memory picture:
+  ┌──┬──┬──┬──┐───────────────
+  │T0│T1│T2│T3│←── all in 1 cache line
+  └──┴──┴──┴──┘───────────────
+  
+  ONE transaction, full efficiency. ✓
+```
+
+### Access pattern 2 — COLUMN-wise (UNCOALESCED ✗)
+
+```
+All threads read SAME COL of DIFFERENT ROWS:
+  Thread 0: A[0][0] = byte  0
+  Thread 1: A[1][0] = byte 16      ← 16 bytes apart!
+  Thread 2: A[2][0] = byte 32      ← 16 bytes apart!
+  
+  Memory picture:
+  ┌──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┐
+  │T0│░░│░░│░░│T1│░░│░░│░░│T2│░░│░░│░░│  ← threads SCATTERED
+  └──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┘     across multiple lines
+  
+  Multiple transactions, wasted bandwidth. ✗
+```
+
+### Why naive matrix multiply is slow
+
+```
+    C = A × B          standard CPU algorithm:
+    
+    for each output C[i][j]:
+        for k in 0..K:
+            C[i][j] += A[i][k] × B[k][j]
+                         ↑        ↑
+                         │        │
+                         │        └── B[k][j]: as k grows, we jump by cols*4 bytes
+                         │            This is COLUMN-WISE access → UNCOALESCED!
+                         │
+                         └── A[i][k]: as k grows, consecutive bytes
+                             This is ROW-WISE → COALESCED ✓
+
+  Result: even though you touch every element of B once, your memory
+  access pattern is terrible. Naive matmul hits maybe 20 GB/s on a T4
+  that peaks at 320 GB/s. 10-30x slowdown vs tiled version.
 ```
 
 Flash Attention, cuBLAS, and every fast kernel are designed to make every memory
-access coalesced. When you implement attention yourself (Week 11), you'll design
-layouts specifically so threads read consecutively.
+access coalesced. When you implement tiled matmul (this Saturday) and attention
+(Week 11), you'll design layouts specifically so threads read consecutively.
 
 ---
 
@@ -331,18 +589,56 @@ PCIe is still the bottleneck between CPU and GPU.
 ## 4.2 The Bandwidth Reality
 
 ```
-CPU RAM (DDR5):      ~100 GB/s
-PCIe 4.0 x16:        ~25 GB/s    ← the bridge between CPU and GPU
-GPU HBM3:            ~3,350 GB/s ← on-GPU bandwidth
+THE BANDWIDTH TRIANGLE — where everything is slow except HBM:
 
-Moving 14 GB (Llama-7B weights) CPU → GPU:
-  14 / 25 = 0.56 seconds
+   ┌───────────────────────────┐         ┌──────────────────────────┐
+   │         CPU               │         │           GPU             │
+   │                           │         │                           │
+   │   ┌──────────────────┐    │   PCIe  │    ┌──────────────────┐   │
+   │   │    CPU CORES     │    │         │    │    GPU CORES     │   │
+   │   │   ~8 × 4 GHz     │    │  slow!  │    │  ~10,000 cores   │   │
+   │   └────────┬─────────┘    │ 25 GB/s │    │    1.5 GHz       │   │
+   │            │              │◄───────►│    └─────────┬────────┘   │
+   │    ~100    │              │         │              │   ~3350    │
+   │    GB/s    ▼              │         │              ▼   GB/s     │
+   │   ┌──────────────────┐    │         │    ┌──────────────────┐   │
+   │   │    DDR5 RAM      │    │         │    │     HBM3         │   │
+   │   │    32-128 GB     │    │         │    │    16-80 GB      │   │
+   │   └──────────────────┘    │         │    └──────────────────┘   │
+   │                           │         │                           │
+   └───────────────────────────┘         └──────────────────────────┘
+   
+   Relative bandwidths:
+     PCIe:    ██                         25 GB/s   ← 130x slower than HBM
+     DDR5:    ████████                  100 GB/s
+     HBM3:    ████████████████████████ 3350 GB/s
+```
 
-Running that model once on GPU:
-  14 / 3,350 = 4 ms (142x faster than the copy!)
+### Why this kills performance if you're not careful
 
-Implication: once your data is on GPU, KEEP IT THERE.
-Every CPU↔GPU transfer is a massive cost.
+```
+Moving 14 GB (Llama-7B weights) from CPU → GPU:
+  
+  ┌────────────────────────────────────────────────────────┐
+  │ PCIe transfer: 14 GB at 25 GB/s                        │
+  │                                                         │
+  │   ████████████████████████████████████████ 560 ms      │
+  │                                                         │
+  └────────────────────────────────────────────────────────┘
+  
+Running the same model once on GPU:
+  
+  ┌────────────────────────────────────────────────────────┐
+  │ HBM read: 14 GB at 3350 GB/s                           │
+  │                                                         │
+  │   █ 4.2 ms                                              │
+  │                                                         │
+  └────────────────────────────────────────────────────────┘
+  
+  Ratio:  560 / 4.2 = 133x faster on GPU once data is there.
+
+Implication: one CPU→GPU copy = running the model 133 times.
+If you copy every token, you're throwing away 99% of your GPU's speed.
 ```
 
 This is why when you call `.to('cuda')` in PyTorch, it's slow the first time and
