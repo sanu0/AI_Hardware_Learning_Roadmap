@@ -6,6 +6,19 @@
 
 ---
 
+## Today's Mental Model
+
+By the end of today, you should be able to look at a CUDA kernel and ask:
+
+1. **How many useful bytes does each warp need?**
+2. **How many bytes does the GPU actually fetch to satisfy that warp?**
+3. **Is performance limited by math, HBM bandwidth, PCIe, or bad access pattern?**
+
+This is the core skill behind fast GEMM, Flash Attention, vLLM paging, quantized
+inference, and almost every "why is my GPU slow?" debugging session.
+
+---
+
 # PART 1: THE STORY
 
 ## 1.1 A Problem That Broke Everything
@@ -100,6 +113,18 @@ But LLM inference does **~1 operation per byte** (read weight, multiply, done).
 You're compute-capability 300x over what your memory can feed. The cores sit idle
 299 out of 300 cycles. **That's why LLMs are memory-bound.**
 
+Important nuance for later:
+
+| Phase | What happens | Usually limited by |
+|-------|--------------|--------------------|
+| **Prefill** | Process the whole prompt in parallel | More compute-heavy because attention over many prompt tokens creates large matmuls |
+| **Decode, batch=1** | Generate one new token at a time | Very memory-bound because weights are streamed for one token |
+| **Decode, large batch** | Generate one token for many users at once | Less memory-bound because the same weights are reused across many sequences |
+
+Today focuses on the **decode, small-batch** case because it exposes the memory
+wall most clearly. Later, batching and continuous serving will teach you how
+systems like vLLM and TensorRT-LLM push the workload toward better GPU utilization.
+
 Intel learned this lesson in the 90s and invented caches. NVIDIA copied the idea
 but had to solve an even harder problem: caches designed for 8 CPU cores don't
 scale to 10,000 GPU threads. They needed something new.
@@ -114,9 +139,16 @@ they designed for **one specific access pattern**:
 > "If 32 threads in a warp read 32 consecutive memory addresses,
 > we'll make that one instruction. One transaction. One fetch."
 
-This was the birth of **memory coalescing**. The GPU doesn't track individual
-thread memory requests. Instead, it looks at all 32 requests from a warp,
-groups them by which cache line they fall in, and issues one transaction per line.
+This idea is **memory coalescing**. The GPU doesn't want to service 32 unrelated
+thread memory requests one by one. Instead, it looks at all addresses requested by
+the warp, groups nearby addresses into the fewest possible memory transactions,
+and fetches aligned chunks of memory.
+
+For today's beginner mental model, think "one aligned 128-byte chunk is perfect
+for 32 FP32 values." Real NVIDIA GPUs use sectors, caches, and architecture-specific
+transaction sizes, but the performance rule is stable:
+
+> Consecutive warp addresses are cheap. Scattered warp addresses waste bandwidth.
 
 **If threads access consecutive addresses (stride 1):**
 
@@ -128,7 +160,7 @@ Thread 2:  A[2]   (byte 8)
 Thread 31: A[31]  (byte 124)
 ```
 
-All within bytes 0-127 = ONE 128-byte cache line = ONE transaction.
+All within bytes 0-127 = one ideal 128-byte warp access.
 32 threads served in the time of 1 transaction. **THIS is what makes GPUs fast.**
 
 **If threads access scattered addresses:**
@@ -140,7 +172,7 @@ Thread 2:  A[50000]  (byte 200000)
 ...
 ```
 
-Each in a different cache line = 32 transactions. 32x more data fetched than needed.
+Each in a different aligned chunk = many transactions. Much more data fetched than needed.
 **Your 2024 H100 suddenly performs like a 2010 GPU.**
 
 This single architectural choice — coalescing — is why NVIDIA dominates AI.
@@ -271,19 +303,33 @@ So NVIDIA added multiple layers of caches:
 | **L1 / L2 cache** | Recent attention activations, hopefully cached |
 | **HBM (global)** | ALL 13.4 GB of weights + KV-cache |
 
-**The killer fact:** NO cache can hold the full model (too big). Every token must
-read all 13.4 GB from HBM. Memory bandwidth is what determines your tokens/sec.
+**The killer fact:** NO cache can hold the full model (too big). In batch-1 dense
+decode, generating each new token roughly streams the model weights from HBM.
+Memory bandwidth is what determines your tokens/sec ceiling.
 
 Reading a float from HBM vs from registers: **500x slower**. So caches matter ENORMOUSLY.
 
-But here's the wrinkle: LLM weights (13.4 GB for Llama-7B) can't fit in ANY cache.
-They live in HBM. Every token generation reads all 13.4 GB once. Even with perfect
-caching, memory bandwidth is the bottleneck.
+But here's the wrinkle: LLM weights (13.4 GB for Llama-7B FP16) can't fit in any
+on-chip cache. They live in HBM. For small-batch decode, the GPU repeatedly streams
+those weights layer by layer. Even with excellent caching of activations/KV data,
+memory bandwidth is the bottleneck.
 
 ## 2.3 Cache Lines — The Unit of Memory Fetch
 
 Your program says "read 4 bytes from address 100." The GPU doesn't actually read 4 bytes.
 It reads an entire **cache line** containing that address.
+
+Small but important nuance: CUDA programmers often say "cache line" when they
+really mean **memory transaction / cache sector / aligned memory segment**. The
+exact size depends on GPU generation, cache level, data type, and instruction.
+For this lesson, we'll use a simplified model:
+
+- A warp has 32 threads.
+- Each thread reads one FP32 value = 4 bytes.
+- A perfectly coalesced warp therefore uses 32 × 4 = **128 bytes**.
+
+That 128-byte number is the mental anchor. Later, Nsight Compute will show you
+the exact sector/request counters for your GPU.
 
 ### Visual: What a cache line looks like
 
@@ -316,13 +362,13 @@ Each L1 cache line holds 32 consecutive floats:
 
 | Cache | Line size | Total | Design philosophy |
 |-------|-----------|-------|-------------------|
-| **L1** (per-SM) | 128 bytes | 228 KB | BIG chunks — matches warp size (32 threads × 4 bytes = 128). Spatial locality from warps → bigger line = fewer transactions. |
-| **L2** (shared) | 32 bytes | 50 MB | SMALL chunks — many SMs make tiny requests at random addresses. Small line = flexibility, less waste. |
+| **L1 / per-SM path** | Often reasoned about as 128-byte warp chunks | 228 KB class on H100 | Big aligned chunks match the ideal 32-thread FP32 warp access. |
+| **L2 / sector path** | Often tracked in smaller sectors such as 32 bytes | 50 MB class on H100 | Smaller sectors reduce waste when many SMs request nearby but not identical data. |
 | **HBM** (global) | — | 80 GB | The source. Slow but massive. |
 
-The 128-byte L1 line size is not arbitrary. It's **exactly the size of a warp's
-coalesced float access**: 32 threads × 4 bytes each = 128 bytes. That's NVIDIA's
-entire hardware designed around one access pattern.
+The 128-byte number is not arbitrary. It's **exactly the size of a warp's
+coalesced FP32 access**: 32 threads × 4 bytes each = 128 bytes. That's why this
+pattern appears everywhere in CUDA teaching, profiling, and kernel design.
 
 When you access memory consecutively, you get the cache line for free after the first
 access — the next 31 reads hit cache. This is why **spatial locality** wins on GPUs
@@ -341,10 +387,15 @@ Every time a warp (32 threads) issues a memory access, the GPU:
 3. Issues ONE memory transaction per unique cache line
 4. Delivers each thread its byte(s) from the fetched lines
 
-**The rule:** minimum transactions = minimum cache lines touched.
+**The rule:** minimum transactions = minimum aligned memory chunks touched.
 
-Best case: all 32 in one line → 1 transaction (at L1) or 4 (at L2). FAST.
-Worst case: all 32 in different lines → 32 transactions. 32x slower.
+Best case: all 32 FP32 values fit in one 128-byte aligned chunk. FAST.
+Worst case: all 32 values live in different chunks. Lots of wasted bandwidth.
+
+This is why profiler metrics often talk about **global load efficiency**,
+**sectors per request**, or **memory throughput**. They are all ways of asking:
+
+> How much of the fetched memory did my program actually use?
 
 ## 3.2 Real Example With Numbers
 
@@ -398,10 +449,10 @@ Memory: │ LINE 0  │ LINE 1  │ LINE 2  │        │ LINE 31 │
         └─────────┴─────────┴─────────┴────────┴─────────┘
          ▲         ▲         ▲                  ▲
          │         │         │                  │
-         1 byte    1 byte    1 byte             1 byte
+         4 bytes   4 bytes   4 bytes            4 bytes
          USED      USED      USED               USED
          
-         127       127       127                127
+         124       124       124                124
          WASTED    WASTED    WASTED             WASTED
 ```
 
@@ -453,7 +504,8 @@ behavior to remember.
 
 ## 3.3 Why The Formula `i = blockIdx.x * blockDim.x + threadIdx.x` Matters
 
-This is the canonical CUDA indexing pattern. **It GUARANTEES coalescing.**
+This is the canonical CUDA indexing pattern. For a simple 1D array, **it gives
+coalesced access** because neighboring thread IDs read neighboring elements.
 
 ```c
 // Thread 0 in block 0: i = 0
@@ -468,8 +520,14 @@ This is the canonical CUDA indexing pattern. **It GUARANTEES coalescing.**
 `A[i]` accesses consecutive addresses. Coalesced.
 
 This is why every CUDA tutorial uses this formula. It's not just convention — it's
-the formula that gives you peak bandwidth. Any other indexing is slower unless you
-have a very specific reason.
+the simplest way to get peak bandwidth for a 1D contiguous array.
+
+Two caveats you should remember even this early:
+
+1. Coalescing depends on the **addresses used by threads in the same warp**, not
+   just the formula text.
+2. In 2D/3D kernels, other indexing formulas can also be perfectly coalesced if
+   neighboring threads still touch neighboring memory.
 
 ## 3.4 Connection To LLMs
 
@@ -607,7 +665,7 @@ Relative bandwidth comparison:
 
 `14 GB ÷ 3,350 GB/s = 4.2 ms`
 
-**One CPU→GPU copy costs as much as running the model 133 times.** If you copy
+**One CPU→GPU copy costs as much as streaming the model weights from HBM 133 times.** If you copy
 every token, you're throwing away 99% of your GPU's speed.
 
 This is why when you call `.to('cuda')` in PyTorch, it's slow the first time and
@@ -672,7 +730,7 @@ __global__ void coalesced(float *in, float *out, int N) {
 // For stride=32, each thread's address is in a different cache line.
 __global__ void strided(float *in, float *out, int N, int stride) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i * stride < N) out[i] = in[i * stride];
+    if (i * stride < N) out[i * stride] = in[i * stride];
 }
 
 int main() {
@@ -717,13 +775,14 @@ int main() {
     for (int s = 0; s < 5; s++) {
         int stride = strides[s];
         int N_eff = N / stride;
+        int blocks_eff = (N_eff + bs - 1) / bs;
         
-        strided<<<blocks, bs>>>(d_in, d_out, N, stride);
+        strided<<<blocks_eff, bs>>>(d_in, d_out, N, stride);
         cudaDeviceSynchronize();
         
         cudaEventRecord(start);
         for (int i = 0; i < 100; i++)
-            strided<<<blocks, bs>>>(d_in, d_out, N, stride);
+            strided<<<blocks_eff, bs>>>(d_in, d_out, N, stride);
         cudaEventRecord(stop);
         cudaEventSynchronize(stop);
         
@@ -731,7 +790,7 @@ int main() {
         cudaEventElapsedTime(&ms_s, start, stop);
         ms_s /= 100;
         
-        // Effective BW = bytes the kernel actually USED, not fetched
+        // Effective BW = useful bytes moved, not the larger amount fetched/wasted.
         float bw_s = 2.0f * N_eff * sizeof(float) / (ms_s/1000.0f) / 1e9;
         printf("  Stride %2d    │ %8.3f │ %6.0f           \n",
                stride, ms_s, bw_s);
@@ -787,13 +846,13 @@ __global__ void coalesced(float *in, float *out, int N) {
 ```c
 __global__ void strided(float *in, float *out, int N, int stride) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i * stride < N) out[i] = in[i * stride];
+    if (i * stride < N) out[i * stride] = in[i * stride];
 }
 ```
 - Input index is `i * stride`, not `i`.
-- With stride=32: threadIdx.x 0 → in[0], threadIdx.x 1 → in[32], ...
-- Warp 0: threads access in[0], in[32], ..., in[992] = bytes 0, 128, 256, ..., 3968.
-- 32 different cache lines. Disaster.
+- With stride=32: threadIdx.x 0 → in[0]/out[0], threadIdx.x 1 → in[32]/out[32], ...
+- Warp 0: threads access indices 0, 32, ..., 992 = bytes 0, 128, 256, ..., 3968.
+- 32 different aligned chunks for both loads and stores. Disaster.
 
 ## 5.2 Exercise 2: Compute Your GPU's Theoretical Peak
 
@@ -885,7 +944,7 @@ __global__ void copy_f4(float4 *in, float4 *out, int N4) {
 // Strided copy — demonstrates uncoalesced penalty
 __global__ void copy_stride(float *in, float *out, int N, int stride) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i * stride < N) out[i] = in[i * stride];
+    if (i * stride < N) out[i * stride] = in[i * stride];
 }
 
 // The "triad" operation from STREAM benchmark: C = A + s*B
@@ -930,7 +989,8 @@ void run_copy_f4(float *A, float *B, float *C, int N, int unused) {
 }
 void run_stride(float *A, float *B, float *C, int N, int stride) {
     int bs = 256;
-    copy_stride<<<(N+bs-1)/bs, bs>>>(A, B, N, stride);
+    int N_eff = N / stride;
+    copy_stride<<<(N_eff+bs-1)/bs, bs>>>(A, B, N, stride);
 }
 void run_triad(float *A, float *B, float *C, int N, int unused) {
     int bs = 256;
@@ -1040,14 +1100,49 @@ Look at the stride column. Every doubling of stride halves your effective bandwi
 This is the SINGLE most important perf behavior on GPUs. If someone tells you
 their kernel is slow and the GPU is memory-bound, this is where to look first.
 
-And the LLM predictions at the bottom? **Those are theoretically tight.**
-Real vLLM/TensorRT-LLM get within ~10% of these numbers. Quantization to INT4
-gives 4x throughput because you read 4x less data. The whole quantization industry
-is built on this memory-bandwidth reality you just measured.
+And the LLM predictions at the bottom? Treat them as **upper-bound intuition**,
+not a promise. Real vLLM/TensorRT-LLM throughput depends on KV-cache traffic,
+attention cost, batching, sampling overhead, kernel launch overhead, and serving
+scheduler behavior. But the direction is correct: quantization can greatly improve
+decode throughput because it reduces the number of bytes read from memory.
+
+The whole quantization industry is built on this memory-bandwidth reality you just
+measured.
 
 ---
 
-# PART 7: WHAT YOU NOW UNDERSTAND
+# PART 7: HOW TO READ THIS IN A PROFILER
+
+You do not need Nsight Compute today, but you should know what you will look for
+when you start profiling real kernels.
+
+| Question | Profiler clue |
+|----------|---------------|
+| Am I memory-bound? | High memory throughput, low SM compute utilization |
+| Are my loads coalesced? | Good global load efficiency, low sectors/request |
+| Am I wasting memory traffic? | Many bytes transferred but low useful work |
+| Is PCIe hurting me? | Large host-device memcpy time in timeline |
+| Is my kernel launch overhead dominating? | Many tiny kernels, low GPU occupancy over time |
+
+The most important habit: never say "the GPU is slow." Say which resource is
+limiting you: **HBM bandwidth, PCIe bandwidth, cache behavior, occupancy, launch
+overhead, or compute throughput**.
+
+## Common Mistakes To Avoid
+
+- **Mistake 1: Timing GPU code without synchronization.** CUDA launches are async.
+  Use CUDA events or `cudaDeviceSynchronize()` around CPU timers.
+- **Mistake 2: Reporting only elapsed time.** Always convert to effective GB/s
+  or TFLOPS so you can compare to hardware limits.
+- **Mistake 3: Counting only useful bytes.** Useful bandwidth and actual memory
+  traffic are different. Uncoalesced access may fetch far more than it uses.
+- **Mistake 4: Copying between CPU and GPU inside a loop.** Keep data on the GPU.
+- **Mistake 5: Assuming every LLM phase is equally memory-bound.** Decode batch=1
+  is the clearest memory-bound case; prefill and batched decode behave differently.
+
+---
+
+# PART 8: WHAT YOU NOW UNDERSTAND
 
 Close this document and try to answer these without looking:
 
@@ -1070,13 +1165,15 @@ minimizing memory access and maximizing coalescing.
 
 - [ ] Understand the memory-compute gap and why it defines GPU performance
 - [ ] Know HBM's physical structure and why it's ~30x faster than DDR5
-- [ ] Understand cache lines (L1: 128 bytes, L2: 32 bytes) and their purpose
+- [ ] Understand cache lines/sectors and why 32 FP32 warp loads map naturally to 128 bytes
 - [ ] Can explain coalescing with a specific example (stride 1 vs stride 32)
 - [ ] Know why `blockIdx.x * blockDim.x + threadIdx.x` is the canonical pattern
 - [ ] Can calculate peak bandwidth from memory clock and bus width
 - [ ] Can measure effective bandwidth and compare to peak
 - [ ] Know when to use each cudaMemcpy direction (H2D, D2H, D2D, default)
 - [ ] Understand PCIe as the CPU-GPU bottleneck
+- [ ] Know why decode batch=1 is more memory-bound than prefill or large-batch decode
+- [ ] Know what profiler clues indicate memory-bound vs compute-bound behavior
 - [ ] Ran all three code exercises and saw coalescing penalty firsthand
 - [ ] Built the Bandwidth Dashboard and read the output intelligently
 - [ ] Can predict LLM inference speed from memory bandwidth measurements
