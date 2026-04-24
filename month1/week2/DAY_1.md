@@ -1163,25 +1163,232 @@ minimizing memory access and maximizing coalescing.
 
 # CHECKLIST
 
-- [ ] Understand the memory-compute gap and why it defines GPU performance
-- [ ] Know HBM's physical structure and why it's ~30x faster than DDR5
-- [ ] Understand cache lines/sectors and why 32 FP32 warp loads map naturally to 128 bytes
-- [ ] Can explain coalescing with a specific example (stride 1 vs stride 32)
-- [ ] Know why `blockIdx.x * blockDim.x + threadIdx.x` is the canonical pattern
-- [ ] Can calculate peak bandwidth from memory clock and bus width
-- [ ] Can measure effective bandwidth and compare to peak
-- [ ] Know when to use each cudaMemcpy direction (H2D, D2H, D2D, default)
-- [ ] Understand PCIe as the CPU-GPU bottleneck
-- [ ] Know why decode batch=1 is more memory-bound than prefill or large-batch decode
-- [ ] Know what profiler clues indicate memory-bound vs compute-bound behavior
-- [ ] Ran all three code exercises and saw coalescing penalty firsthand
-- [ ] Built the Bandwidth Dashboard and read the output intelligently
-- [ ] Can predict LLM inference speed from memory bandwidth measurements
+- [x] Understand the memory-compute gap and why it defines GPU performance
+- [x] Know HBM's physical structure and why it's ~30x faster than DDR5
+- [x] Understand cache lines/sectors and why 32 FP32 warp loads map naturally to 128 bytes
+- [x] Can explain coalescing with a specific example (stride 1 vs stride 32)
+- [x] Know why `blockIdx.x * blockDim.x + threadIdx.x` is the canonical pattern
+- [x] Can calculate peak bandwidth from memory clock and bus width
+- [x] Can measure effective bandwidth and compare to peak
+- [x] Know when to use each cudaMemcpy direction (H2D, D2H, D2D, default)
+- [x] Understand PCIe as the CPU-GPU bottleneck
+- [x] Know why decode batch=1 is more memory-bound than prefill or large-batch decode
+- [x] Know what profiler clues indicate memory-bound vs compute-bound behavior
+- [x] Ran all three code exercises and saw coalescing penalty firsthand
+- [x] Built the Bandwidth Dashboard and read the output intelligently
+- [x] Can predict LLM inference speed from memory bandwidth measurements
+
+---
+
+# DETAILED ANSWERS
+
+## 1. Why is HBM faster than DDR5?
+
+HBM is faster because it is physically designed for **bandwidth**, not upgradeability
+or long-distance signaling. DDR5 DIMMs sit away from the CPU on the motherboard and
+connect through a relatively narrow bus. HBM stacks sit on the same package as the
+GPU, connected through many short wires called TSVs/interposer connections.
+
+The simplified bandwidth equation is:
+
+```text
+bandwidth = transfers_per_second × bus_width_bytes
+```
+
+DDR5 runs at a high clock, but the bus is narrow. HBM may run at a lower clock, but
+it has thousands of wires in parallel. That huge bus width is the win.
+
+Example intuition:
+
+```text
+DDR5: fewer lanes, faster cars
+HBM:  many more lanes, slightly slower cars
+```
+
+For GPUs, the many-lane highway wins because thousands of CUDA cores are hungry for
+data at the same time.
+
+## 2. What's a cache line and why does size matter?
+
+A cache line, sector, or aligned memory segment is the chunk of memory the hardware
+fetches when your program asks for data. Your thread may ask for 4 bytes, but the
+memory system usually fetches a larger aligned chunk around that address.
+
+For the beginner CUDA mental model:
+
+```text
+1 warp = 32 threads
+1 FP32 value = 4 bytes
+32 threads × 4 bytes = 128 bytes
+```
+
+So if a warp reads 32 consecutive FP32 values, those 32 useful values fit naturally
+into a 128-byte aligned chunk. That is efficient because almost every fetched byte
+is used.
+
+If the warp reads scattered addresses, the GPU may fetch many chunks while using
+only a few bytes from each chunk. That wastes bandwidth. Cache-line size matters
+because it controls the granularity of memory traffic: you pay for chunks, not
+individual floats.
+
+## 3. What's the difference between coalesced and uncoalesced access?
+
+Coalesced access means neighboring threads in a warp access neighboring memory
+addresses. The hardware can combine those requests into a small number of memory
+transactions.
+
+Example:
+
+```c
+float x = A[i];  // thread 0 reads A[0], thread 1 reads A[1], ...
+```
+
+For FP32, warp 0 uses:
+
+```text
+A[0]..A[31] = bytes 0..127
+```
+
+That is ideal.
+
+Uncoalesced access means neighboring threads access far-apart addresses.
+
+Example:
+
+```c
+float x = A[i * 32];
+```
+
+Warp 0 uses:
+
+```text
+thread 0 → A[0]    byte 0
+thread 1 → A[32]   byte 128
+thread 2 → A[64]   byte 256
+...
+```
+
+Now each thread lands in a different aligned chunk. The warp still does useful
+work, but it wastes most of the memory bandwidth it requested.
+
+## 4. Why is `i = blockIdx.x * blockDim.x + threadIdx.x; A[i]` coalesced?
+
+For a simple 1D contiguous array, this formula maps consecutive thread IDs to
+consecutive element indices.
+
+Inside a warp:
+
+```text
+threadIdx.x = 0  → i = base + 0
+threadIdx.x = 1  → i = base + 1
+threadIdx.x = 2  → i = base + 2
+...
+threadIdx.x = 31 → i = base + 31
+```
+
+If the code reads:
+
+```c
+A[i]
+```
+
+then the warp reads neighboring memory addresses. That is why this indexing pattern
+is the canonical CUDA pattern for vector operations.
+
+Important caveat: coalescing depends on the **actual addresses used by the warp**.
+Other indexing formulas can also be coalesced, and this formula can become part of
+an uncoalesced access if you later do something like `A[i * stride]`.
+
+## 5. Why is LLM inference memory-bound?
+
+In small-batch decode, each generated token requires running through all model
+layers. For a dense model, that means the GPU streams a large amount of weight data
+from HBM.
+
+For LLaMA-7B FP16:
+
+```text
+~6.7B parameters × 2 bytes ≈ 13.4 GB of weights
+```
+
+For batch-1 decode, those weights are used for only one new token. That gives low
+arithmetic intensity:
+
+```text
+many bytes read per token
+not enough math per byte to saturate Tensor Cores
+```
+
+Prefill and large-batch decode reuse weights across many tokens/sequences, so they
+do more math per byte loaded. Batch-1 decode is the clearest memory-bound case.
+
+## 6. How do you measure bandwidth efficiency?
+
+The basic formula for effective bandwidth is:
+
+```text
+effective_bandwidth = useful_bytes_moved / time_seconds
+```
+
+For a copy kernel:
+
+```c
+out[i] = in[i];
+```
+
+each element does:
+
+```text
+1 read + 1 write = 2 × bytes
+```
+
+So:
+
+```c
+float bw = 2.0f * bytes / (ms / 1000.0f) / 1e9;
+```
+
+This reports useful GB/s. To understand efficiency, compare it to theoretical peak:
+
+```text
+percent_of_peak = effective_bandwidth / peak_bandwidth × 100
+```
+
+For uncoalesced kernels, useful bandwidth may be low even when actual memory traffic
+is high, because many fetched bytes are wasted.
+
+## 7. Why does quantization speed up inference?
+
+Quantization stores each weight using fewer bits.
+
+Approximate LLaMA-7B sizes:
+
+```text
+FP32: 6.7B × 4 bytes   ≈ 26.8 GB
+FP16: 6.7B × 2 bytes   ≈ 13.4 GB
+INT8: 6.7B × 1 byte    ≈ 6.7 GB
+INT4: 6.7B × 0.5 bytes ≈ 3.35 GB
+```
+
+In memory-bound decode, throughput is roughly limited by:
+
+```text
+tokens_per_second ≈ memory_bandwidth / bytes_read_per_token
+```
+
+If INT4 makes the model about 4× smaller than FP16, the GPU reads about 4× fewer
+weight bytes per token. That can greatly increase decode throughput.
+
+Real systems also pay for dequantization, KV-cache traffic, attention work, sampling,
+and scheduler overhead, so the speedup is not always exactly 4×. But the core reason
+quantization helps is simple:
+
+> fewer bytes per weight → fewer HBM bytes per token → higher memory-bound throughput.
 
 **Tomorrow (Day 2): Shared Memory** — the on-chip SRAM that sidesteps HBM entirely.
 Where Flash Attention's magic lives.
 
 ---
 
-*Status: ⬜ NOT YET COMPLETED*
-*Date completed: ___________*
+*Status: ✅ COMPLETED*
+*Date completed: 2026-04-25*

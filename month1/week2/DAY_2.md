@@ -1778,6 +1778,353 @@ If you can answer these, you now understand one of the biggest differences betwe
 - [ ] Built the tiled transpose mini-project
 - [ ] Can connect shared memory to tiled GEMM and Flash Attention
 
+---
+
+# DETAILED ANSWERS
+
+## 1. Why does shared memory help?
+
+Shared memory helps because it lets threads in the same block reuse data from
+on-chip SRAM instead of repeatedly fetching the same values from global memory.
+
+Global memory/HBM is large but far away. Shared memory is tiny but close to the
+SM's execution units. The point is not that shared memory makes one global load
+faster. The point is that shared memory reduces how many global loads you need.
+
+Example:
+
+```text
+Naive:
+  thread 0 reads A[k] from global
+  thread 1 reads A[k] from global
+  thread 2 reads A[k] from global
+
+Shared:
+  one group of threads loads A[k] into shared memory
+  many threads reuse A[k] from shared memory
+```
+
+This is why shared memory is central to tiled matrix multiplication. A tile of A
+and a tile of B are loaded once, then reused for many multiply-add operations.
+That increases arithmetic intensity:
+
+```text
+more math per byte loaded from HBM
+```
+
+## 2. What is the scope and lifetime of shared memory?
+
+Shared memory is **block-scoped** and **temporary**.
+
+Block-scoped means:
+
+```text
+threads inside the same block can read/write the same shared-memory allocation
+threads in different blocks cannot see each other's shared memory
+```
+
+Temporary means:
+
+```text
+shared memory exists only while that block is running
+when the block finishes, its shared memory disappears
+```
+
+If a grid has 100 blocks, each block gets its own private shared-memory region.
+There is no global shared-memory pool where all blocks communicate. For block-to-block
+communication, you usually write to global memory and launch another kernel, or use
+more advanced cooperative-group patterns later.
+
+This is why CUDA algorithms are designed as independent tiles:
+
+```text
+one block owns one tile
+the block uses shared memory for that tile
+the block writes final results to global memory
+```
+
+## 3. Why do we need `__syncthreads()` after loading a shared tile?
+
+Because threads run independently, even inside the same block. Some threads may
+finish loading their part of the tile earlier than others.
+
+Without synchronization:
+
+```c
+tile[threadIdx.x] = global[i];
+float neighbor = tile[threadIdx.x + 1];  // neighbor may not be loaded yet
+```
+
+That read can happen before the neighboring thread writes its value. The result is
+a race condition.
+
+`__syncthreads()` is a block-wide barrier:
+
+```text
+all threads must arrive
+all shared-memory writes before the barrier become visible
+then all threads continue
+```
+
+Correct pattern:
+
+```c
+tile[threadIdx.x] = global[i];
+__syncthreads();
+// now it is safe to read tile values written by other threads
+```
+
+The barrier must be reached by every thread in the block. If only some threads
+execute it, the block can deadlock.
+
+## 4. What are shared memory banks?
+
+Shared memory is divided into independent banks so many threads can access it in
+parallel. The standard beginner mental model is:
+
+```text
+32 banks
+FP32 word index maps to bank = index % 32
+```
+
+So:
+
+```text
+shared[0]  → bank 0
+shared[1]  → bank 1
+...
+shared[31] → bank 31
+shared[32] → bank 0 again
+```
+
+If a warp's 32 threads access 32 different banks, the access can be served in
+parallel. If many threads access different addresses in the same bank, those
+accesses serialize.
+
+This is the shared-memory version of the coalescing idea:
+
+```text
+global memory: make transactions efficient
+shared memory: spread accesses across banks
+```
+
+## 5. What causes a bank conflict?
+
+A bank conflict happens when multiple threads in the same warp access **different
+addresses** that map to the same shared-memory bank.
+
+Conflict example:
+
+```c
+float x = shared[threadIdx.x * 32];
+```
+
+For a warp:
+
+```text
+thread 0 → shared[0]    → bank 0
+thread 1 → shared[32]   → bank 0
+thread 2 → shared[64]   → bank 0
+...
+thread 31 → shared[992] → bank 0
+```
+
+All 32 threads hit bank 0. The bank must serve them in multiple serialized steps,
+so the access is much slower.
+
+Important exception: if all threads read the **exact same address**, the hardware
+can broadcast that value. That is not a harmful bank conflict.
+
+```text
+same address, same bank       → broadcast, fast
+different addresses, same bank → conflict, serialized
+```
+
+## 6. Why does `[32][33]` fix column-wise bank conflicts?
+
+A 2D shared tile:
+
+```c
+__shared__ float tile[32][32];
+```
+
+is stored row-major. The address index is:
+
+```text
+index = row * 32 + col
+```
+
+For column-wise access:
+
+```c
+tile[threadIdx.x][constant_col]
+```
+
+the bank is:
+
+```text
+bank = (threadIdx.x * 32 + constant_col) % 32
+     = constant_col
+```
+
+Every thread maps to the same bank. That creates a 32-way bank conflict.
+
+With padding:
+
+```c
+__shared__ float tile[32][33];
+```
+
+the address index becomes:
+
+```text
+index = row * 33 + col
+```
+
+For column-wise access:
+
+```text
+bank = (threadIdx.x * 33 + constant_col) % 32
+     = (threadIdx.x + constant_col) % 32
+```
+
+Now consecutive threads land in consecutive banks. The extra column changes the
+modulo arithmetic. You add padding not because you need more data, but because you
+need a better memory layout for the hardware.
+
+## 7. When is constant memory fast?
+
+Constant memory is fast when all threads in a warp read the same address. In that
+case, the hardware can broadcast one value to the whole warp.
+
+Good pattern:
+
+```c
+float scale = c_params[0];  // every lane reads c_params[0]
+```
+
+This is useful for:
+
+- small filter coefficients
+- scalar configuration values
+- small read-only lookup tables when access is uniform
+- fixed constants used by many threads
+
+Bad or less useful pattern:
+
+```c
+float x = c_table[threadIdx.x];  // each lane reads a different address
+```
+
+Now the warp does not get one clean broadcast. Accesses may serialize or lose the
+constant-cache advantage.
+
+The rule:
+
+```text
+constant memory = tiny + read-only + warp-uniform access
+```
+
+It is not where LLM weights live. It is far too small for that.
+
+## 8. Why is local memory slow despite its name?
+
+In CUDA, "local" means local to a thread's private address space. It does **not**
+mean physically close to the SM.
+
+Local memory often lives in global memory/HBM. It appears when a thread has private
+data that cannot fit in registers, such as:
+
+- too many live variables
+- large private arrays
+- register spills
+- compiler decisions caused by register pressure
+
+Example:
+
+```c
+float tmp[128];  // private per-thread array
+```
+
+This may become local memory. Every thread has its own `tmp`, but those values may
+be stored in global memory. That makes accesses much slower than registers.
+
+This is why register pressure matters. A kernel can become slower after adding more
+fusion or more temporary variables because the compiler starts spilling to local
+memory.
+
+## 9. How do register spills show up in compiler output?
+
+Compile with:
+
+```bash
+nvcc -Xptxas -v my_kernel.cu -o my_kernel
+```
+
+Look for lines like:
+
+```text
+ptxas info    : Used 64 registers
+ptxas info    : 384 bytes spill stores
+ptxas info    : 384 bytes spill loads
+```
+
+The important words are:
+
+```text
+spill stores
+spill loads
+```
+
+They mean the compiler could not keep all private thread values in registers. It
+stored some values in local memory and later loaded them back.
+
+Why this matters:
+
+```text
+register access → very fast, on-chip
+spill/local access → much slower, often global memory path
+```
+
+Spills also indicate a resource tradeoff. Maybe the kernel has too many temporary
+variables. Maybe it fused too much work. Maybe reducing tile size or simplifying
+the kernel would improve occupancy and remove spills.
+
+## 10. How does shared memory prepare you for tiled GEMM and Flash Attention?
+
+Shared memory teaches the central GPU optimization pattern:
+
+```text
+load a tile from global memory
+reuse it many times on-chip
+avoid unnecessary HBM traffic
+write final result back to global memory
+```
+
+In tiled GEMM:
+
+```text
+C = A × B
+```
+
+each block loads a tile of A and a tile of B into shared memory. Threads reuse
+those tiles for many multiply-adds before loading the next tile. This raises
+arithmetic intensity: more math per byte read from HBM.
+
+In Flash Attention:
+
+```text
+softmax(QK^T)V
+```
+
+the kernel avoids materializing the huge attention matrix in global memory. It
+loads Q/K/V blocks into on-chip memory, computes partial attention, maintains
+running softmax statistics, and writes only the needed output.
+
+Both are the same idea:
+
+> Keep temporary/reused data close to the SM, and avoid round trips to HBM.
+
 **Tomorrow (Day 3): Backpropagation & Gradient Descent** — how neural networks
 learn by pushing errors backward through the computation graph.
 
