@@ -168,6 +168,13 @@ People often summarize this as "shared memory is ~100x faster than global memory
 The exact ratio depends on GPU generation and access pattern, but the lesson is
 correct: shared memory is close to the compute; HBM is far away.
 
+The deeper idea is **data movement distance**. A number in a register is already
+inside the thread's execution context. A number in shared memory is still on the
+SM, close enough that many threads can coordinate around it. A number in HBM has
+to travel across the GPU package through memory controllers and caches. High-end
+GPUs are not slow because they cannot multiply; they are slow when the numbers
+arrive too late. Shared memory is one of your tools for shortening that trip.
+
 ## 2.2 Shared Memory Scope And Lifetime
 
 This is the most important rule:
@@ -192,6 +199,12 @@ Grid
 
 If you launch 100 blocks, each block gets its own private shared-memory allocation.
 They do not communicate through shared memory.
+
+This explains a design pattern you will see constantly: make each block own a
+small independent tile of the problem. The block loads its tile, computes as much
+as possible using that tile, then writes results back to global memory. CUDA likes
+problems that can be chopped into many independent tiles because the scheduler can
+spread those blocks across SMs without needing block-to-block coordination.
 
 ## 2.3 Why Shared Memory Is Not A Cache
 
@@ -219,6 +232,12 @@ Automatic cache:
 Shared memory:
   "I know this tile will be reused. Put it here, then all threads reuse it."
 ```
+
+That explicitness is both power and danger. If you choose the wrong tile, forget
+a halo value, skip a synchronization, or create bank conflicts, shared memory can
+make a kernel more complicated without making it faster. The professional habit is
+to ask: **how many global memory reads did I remove, and what did shared memory
+cost me in synchronization, bank conflicts, and occupancy?**
 
 That control is why high-performance CUDA kernels use shared memory everywhere:
 
@@ -252,6 +271,11 @@ __shared__ float tile[32][32];
 
 This is simple and readable.
 
+Static shared memory is great for teaching and for kernels with a natural fixed
+tile shape. For example, a transpose kernel often uses a 32×32 tile because that
+maps cleanly to a warp-sized mental model. The compiler can see the size, allocate
+it predictably, and sometimes optimize around it.
+
 ## 3.2 Dynamic Shared Memory
 
 Dynamic shared memory size is chosen at kernel launch time:
@@ -276,6 +300,23 @@ Use dynamic shared memory when tile size depends on runtime choices:
 - variable sequence length
 - variable tile shape
 - one kernel supports many configurations
+
+Dynamic shared memory is what you reach for when one kernel needs to support many
+problem sizes. For example, an attention kernel may want different shared-memory
+sizes for short vs long sequences, or an autotuner may try several tile sizes and
+pick the fastest. The tradeoff is readability: `extern __shared__ float tile[]`
+is just a raw buffer, so you must manually carve it into regions if you store
+multiple arrays inside it.
+
+Example layout:
+
+```c
+extern __shared__ float smem[];
+float *tile_A = smem;
+float *tile_B = smem + TILE_SIZE;
+```
+
+That is powerful, but it is also where indexing mistakes hide.
 
 ## 3.3 The Most Important Shared Memory Rule: Synchronize
 
@@ -332,6 +373,19 @@ if (threadIdx.x < 128) {
 }
 ```
 
+The barrier is not just "wait a bit." It is a correctness contract. If 255 threads
+arrive and one thread never arrives, the 255 wait forever. This is why CUDA kernels
+often load boundary/halo values with conditional logic, then place one unconditional
+`__syncthreads()` after all loading is done. Branches before the barrier are fine;
+skipping the barrier is not.
+
+Also remember that barriers have a cost. If you synchronize after every tiny
+operation, you may destroy performance. Good tiled kernels usually follow a rhythm:
+
+```text
+load tile -> synchronize -> compute a lot -> synchronize if tile will be reused
+```
+
 ---
 
 # PART 4: SHARED MEMORY BANKS
@@ -383,6 +437,16 @@ serve them one after another. Slow.
 
 That is a **bank conflict**.
 
+The bank system exists for the same reason HBM has many wires: parallelism. Shared
+memory is not one magical single-port box. It is many small lanes working together.
+When a warp spreads its requests across banks, the hardware serves them together.
+When a warp piles different addresses onto one bank, that bank becomes the narrow
+door everyone is trying to walk through.
+
+Bank conflicts are easy to miss because the code still gives the correct answer.
+This is a performance bug, not a correctness bug. That makes it dangerous: your
+kernel works, but it quietly leaves speed on the table.
+
 ## 4.2 Perfect Shared Memory Access
 
 ```c
@@ -398,6 +462,11 @@ Bank:      0   1   2   3      ...      30  31
 Result: 32 banks used → no conflict → fast
 ```
 
+This is the shared-memory version of coalescing. In global memory, you wanted
+neighboring threads to touch neighboring addresses so memory transactions were
+efficient. In shared memory, you want neighboring threads to touch addresses that
+land in different banks so the SRAM lanes work in parallel.
+
 ## 4.3 Worst Shared Memory Access
 
 ```c
@@ -412,6 +481,10 @@ Bank:      0    0    0    0   ...      0
 
 Result: 32 threads fight for bank 0 → 32-way bank conflict → slow
 ```
+
+A 32-way bank conflict does not mean the value is wrong. It means what could have
+happened in one parallel step becomes many serialized steps. You paid for 32 lanes
+of shared-memory bandwidth but used only one lane effectively.
 
 Important exception:
 
@@ -551,6 +624,16 @@ No conflict.
 
 This tiny extra column is one of the most famous CUDA tricks.
 
+Padding feels silly until you understand the modulo. You are not adding the extra
+column because you need more data. You add it to change the address arithmetic.
+By making the row stride 33, every new row starts one bank later than the previous
+row. That tiny shift breaks the pattern that made all threads collide.
+
+This is a general GPU lesson:
+
+> Sometimes the fastest data structure is not the smallest one. It is the one whose
+> layout matches the hardware.
+
 ---
 
 # PART 5: CONSTANT MEMORY
@@ -582,6 +665,11 @@ Then kernels read it:
 float w = c_filter[k];
 ```
 
+Constant memory is controlled from the host side. Kernels cannot write to
+`__constant__` variables. You update them before launching the kernel, and every
+thread sees the same read-only data. That makes constant memory feel like a tiny
+GPU-side configuration page.
+
 ## 5.2 Why Constant Memory Can Be Fast
 
 If every thread in a warp reads the same constant address:
@@ -609,6 +697,11 @@ This is perfect for:
 - fixed coefficients
 - small read-only metadata
 
+The broadcast behavior is the main reason constant memory exists. If 32 threads
+all need the same scalar, constant memory can behave almost like saying, "tell the
+whole warp this value once." That is different from 32 independent global loads.
+For small read-only parameters, it is elegant and simple.
+
 ## 5.3 When Constant Memory Is Bad
 
 If each thread reads a different constant address:
@@ -632,6 +725,21 @@ Not one broadcast. Less helpful.
 Constant memory is not "global memory but magically faster." It is fast when the
 warp reads the same location.
 
+This is the pattern distinction:
+
+```text
+Good:
+  all lanes read c_filter[k] for the same k
+
+Less good:
+  lane 0 reads c_table[0]
+  lane 1 reads c_table[1]
+  lane 2 reads c_table[2]
+```
+
+If your access pattern is divergent, normal global memory or texture/read-only
+caches may be a better fit. The memory space must match the access pattern.
+
 The rule:
 
 ```text
@@ -650,6 +758,11 @@ It is not.
 
 In CUDA, **local memory** means memory private to one thread but stored in global
 memory. It often appears when a thread has more private data than registers can hold.
+
+This naming has fooled many beginners. "Local" means local to the thread's
+address space, not local to the SM. A local-memory value belongs to one thread,
+but physically it can live far away in global memory. So it has privacy like a
+register, but latency more like global memory.
 
 ```
 Thread private data:
@@ -694,6 +807,16 @@ ptxas info    : Used 64 registers, 384 bytes spill stores, 384 bytes spill loads
 ```
 
 If you see spills, your kernel may be slower than expected.
+
+Register pressure creates a three-way tradeoff:
+
+1. More registers per thread can make each thread faster because it keeps values close.
+2. Too many registers per thread can reduce occupancy because fewer warps fit on an SM.
+3. If the compiler runs out of registers, spills create slow local-memory traffic.
+
+This is why high-performance CUDA is not just "use more registers" or "use more
+shared memory." Every on-chip resource is limited, and using too much of one can
+reduce the amount of parallel work the SM can keep resident.
 
 ## 6.3 Local Memory Mental Model
 
@@ -761,6 +884,12 @@ blockDim.x + 2
 ```
 
 One extra value on the left, one extra value on the right.
+
+This "tile plus halo" pattern shows up everywhere. In convolution, image filters
+need neighboring pixels. In finite-difference physics simulations, each cell needs
+neighboring cells. In attention and GEMM, the "halo" idea becomes tile boundaries
+and edge cases. The core habit is the same: when a block owns a tile, ask what
+extra neighboring data the computation needs to be correct.
 
 ```c
 %%writefile shared_stencil.cu
@@ -917,6 +1046,15 @@ The lesson is:
 
 This becomes much more important in tiled matrix multiplication, convolution, and
 Flash Attention, where reuse is massive.
+
+A useful rule of thumb:
+
+```text
+If each loaded value is reused 1 time, shared memory may not help.
+If each loaded value is reused 10, 100, or 1000 times, shared memory becomes powerful.
+```
+
+Shared memory is a reuse amplifier.
 
 ## 7.2 Exercise 2: Bank Conflict vs Padding
 
@@ -1077,6 +1215,11 @@ If the speedup is smaller than expected, that is not failure. Modern GPUs have
 improved shared-memory behavior, and compilers are clever. The concept still
 matters because bank conflicts appear in real tiled kernels.
 
+This demo intentionally repeats the same access many times so the timing signal is
+large enough to notice. Real kernels may have bank conflicts mixed with arithmetic,
+global-memory traffic, and synchronization, so the conflict may not dominate the
+whole runtime. Nsight Compute is how you eventually confirm it.
+
 ## 7.3 Exercise 3: Constant Memory Broadcast
 
 This demo compares two constant-memory access patterns:
@@ -1221,6 +1364,10 @@ same model metadata used by many threads
 
 But if every lane reads a different address, constant memory loses its special
 broadcast advantage.
+
+Think of constant memory as a megaphone, not a library. It is excellent when one
+small fact needs to be announced to the whole warp. It is not ideal when every
+thread wants to browse a different shelf.
 
 ---
 
@@ -1477,6 +1624,18 @@ This project connects everything:
 This is not a toy. Matrix transpose is a real layout operation in high-performance
 ML systems.
 
+The important conceptual move is this:
+
+```text
+Use shared memory as a safe place to perform an awkward rearrangement.
+```
+
+Global memory wants contiguous reads and contiguous writes. A transpose naturally
+breaks one of those. Shared memory lets you read global memory in the order it
+likes, rearrange the data on-chip, then write global memory in the order it likes.
+That same trick appears in many optimized kernels: make global memory happy, do
+the messy layout work close to the SM.
+
 ---
 
 # PART 9: HOW THIS CONNECTS TO LLMs
@@ -1510,6 +1669,12 @@ Global B tile ─┘
 
 The whole game is reuse.
 
+In a naive GEMM, an element of A or B may be fetched from global memory again and
+again by different threads. In a tiled GEMM, a block pays the global-memory cost
+once for a tile, then reuses the tile for many multiply-adds. That raises
+**arithmetic intensity**: more math per byte loaded. You will see this phrase
+constantly in GPU performance work.
+
 ## 9.2 Flash Attention
 
 Attention wants to compute:
@@ -1531,6 +1696,11 @@ That is the same idea you learned today:
 
 > Move small tiles close to the compute, reuse them, and avoid unnecessary HBM traffic.
 
+Flash Attention is not magic because it changed the math of attention. It is magic
+because it changed where intermediate data lives. The attention matrix is too large
+and too temporary to deserve a round trip through HBM. Shared memory/registers let
+the kernel compute what it needs and throw away what it does not.
+
 ## 9.3 Constant Memory In LLM Kernels
 
 Constant memory is useful for small read-only values:
@@ -1541,6 +1711,11 @@ Constant memory is useful for small read-only values:
 - metadata that many threads read uniformly
 
 It is not where model weights live. LLM weights are far too large.
+
+So when you hear "constant memory" in an LLM context, think **small constants**,
+not parameters. Model weights live in global memory/HBM, maybe quantized and
+cached/tiled by kernels. Constant memory is for tiny read-only values that many
+threads use uniformly.
 
 ## 9.4 Local Memory In LLM Kernels
 
@@ -1557,6 +1732,12 @@ a kernel that does "more fusion" gets slower because it spills too much.
 That is a professional-level CUDA lesson:
 
 > More work per kernel is good only until registers and shared memory become the bottleneck.
+
+This is why kernel fusion is an art. Fusing two operations can save HBM traffic,
+but it also increases the number of live temporary values. If those temporaries
+spill to local memory, the fused kernel can lose the benefit it was supposed to
+gain. The best CUDA engineers think in budgets: registers, shared memory, occupancy,
+memory traffic, and arithmetic intensity.
 
 ---
 
