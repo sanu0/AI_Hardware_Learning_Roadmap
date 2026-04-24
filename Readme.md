@@ -197,17 +197,19 @@ Every monthly project README should include:
 - [ ] Training loss curves + sample generations at checkpoints
 - [ ] **Publish to GitHub with trained weights**
 
-## Month 2 Project B: "Attention Visualizer — See What Your Model Thinks"
-**What:** An interactive tool that loads any trained Transformer model, runs input through it, and visualizes attention patterns across all heads and layers with heatmaps.
-**Novelty:** Shows attention evolution ACROSS LAYERS (not just one layer) — watch how the model's "understanding" builds from raw tokens to deep meaning. Highlight which heads do positional attention, which do semantic, which are redundant.
-**Skills used:** Transformer architecture (Month 2), GPU profiling (Month 2), CUDA memory (Month 1), matmul (Month 1)
+## Month 2 Project B: "TransformerScope — LLM Behavior Debugger"
+**What:** An interactive debugger for small Transformer models that shows what changed inside the model when an output changed.
+**Novelty:** Combines interpretability with GPU profiling: not only "which head attended where?" but "which layer/head/MLP changed the prediction, and what did it cost on the GPU?"
+**Skills used:** Transformer architecture (Month 2), residual stream/logit lens (Month 2), GPU profiling (Month 2), CUDA memory + matmul (Month 1)
 **Deliverables:**
-- [ ] Load any HuggingFace model, extract attention weights from all layers/heads
-- [ ] Per-layer attention heatmap: which token attends to which
-- [ ] Cross-layer attention flow: track how attention patterns change layer by layer
-- [ ] Head importance analysis: which heads matter most (prune and measure quality drop)
-- [ ] Interactive web UI (Gradio/Streamlit)
-- [ ] **Publish to GitHub**
+- [ ] Load nanoLLM checkpoints and small HuggingFace Transformer models
+- [ ] Attention heatmaps across layers/heads
+- [ ] Residual stream + logit lens view: how token probabilities evolve by layer
+- [ ] Head/MLP ablation: disable a component and measure output probability changes
+- [ ] Prompt-diff mode: compare two prompts and show which internal activations changed most
+- [ ] GPU overlay: per-layer latency, memory, and tensor shapes
+- [ ] Interactive web UI with saved debugging reports
+- [ ] **Publish with 5 case studies: factual recall, copying, induction, refusal, hallucination**
 
 ---
 
@@ -278,23 +280,25 @@ Every monthly project README should include:
 - [ ] NIM for LLM inference backend
 - [ ] **Publish with Docker Compose for one-command deployment**
 
-## Month 5 Project B: "DocuMind — AI Research Assistant"
-**What:** An AI assistant that ingests your entire paper/document library, builds a knowledge graph, and answers complex research questions by reasoning across multiple documents with citations.
-**Novelty:** Not just RAG — it builds **cross-document reasoning chains**. "Paper A proposes method X, Paper B shows it fails on Y, Paper C fixes it with Z" — synthesized from 3 different documents automatically.
-**Skills used:** RAG (Month 5), Graph RAG (Month 5), agents (Month 5), NVIDIA NIM (Month 5), quantization (Month 4), all CUDA fundamentals
+## Month 5 Project B: "RAGTrace — Retrieval Debugger & Evaluation Lab"
+**What:** A diagnostic tool that wraps any RAG pipeline and records every retrieval decision behind an answer.
+**Novelty:** Turns RAG from a black box into a flight recorder: query rewrite, retrieved chunks, reranker scores, context packing, citations, answer claims, and failure reason in one trace.
+**Skills used:** RAG (Month 5), vector search (Month 5), RAG evaluation (Month 5), serving (Month 5), quantization/cost tradeoffs (Month 4), CUDA memory/perf basics (Month 1)
 **Deliverables:**
-- [ ] Ingest 50+ research papers (PDF → parse → chunk → embed)
-- [ ] Knowledge graph: entities (methods, datasets, results) + relationships
-- [ ] Cross-document reasoning: answer questions requiring info from multiple papers
-- [ ] Citation generation: every claim linked to source paper + page
-- [ ] "Research gap finder": identify what hasn't been tried yet
-- [ ] **Publish to GitHub with demo on real AI papers**
+- [ ] Plug-in wrapper for LangChain/LlamaIndex/custom RAG pipelines
+- [ ] Trace viewer: query → rewritten query → retrieved chunks → reranked chunks → final context → answer
+- [ ] Failure classifier: missing retrieval, bad chunking, weak reranking, unsupported claim, stale document
+- [ ] Chunking/reranking experiment runner with side-by-side quality metrics
+- [ ] Citation verifier: every generated claim mapped to source span or marked unsupported
+- [ ] Cost/latency breakdown per query: embedding, retrieval, rerank, generation
+- [ ] Public benchmark on at least 3 document sets
+- [ ] **Publish as a reusable RAG debugging tool**
 
 ---
 
 ## Month 6 Project A: "AgentForge — Multi-Agent AI Platform" ⭐ (MILESTONE PROJECT)
 **What:** A platform where you can define AI agents with different roles, tools, and memory, and they collaborate to complete complex tasks.
-**Novelty:** **Agent performance profiler** — tracks every LLM call, tool use, reasoning step, and generates a visual trace showing exactly how agents collaborated (or failed), with cost tracking per agent. Nobody builds agents with this level of observability.
+**Novelty:** **Agent performance profiler** — tracks every LLM call, tool use, reasoning step, and generates a visual trace showing exactly how agents collaborated (or failed), with cost tracking per agent. The key value is production-style observability, not just agent orchestration.
 **Deliverables:**
 - [ ] Agent framework: define agents with roles, tools, system prompts
 - [ ] Tools: code execution (sandboxed), web search, file system, RAG retrieval, API calls
@@ -307,32 +311,34 @@ Every monthly project README should include:
 - [ ] Evaluate on 3 real tasks: research report, code debugging, data analysis
 - [ ] **Publish with demo video and live hosted demo**
 
-## Month 6 Project B: "LLM-Arena — Model Comparison Battleground"
-**What:** A self-hosted Chatbot Arena clone where you can load 2+ LLMs, ask them the same questions, vote on which is better, and generate an ELO leaderboard with statistical analysis.
-**Novelty:** Includes **automatic evaluation** alongside human voting — runs LLM-as-judge, computes agreement rate between human and AI judge, and shows "your judgment aligns with GPT-4's 78% of the time."
-**Skills used:** Agents (Month 6), RLHF/DPO understanding (Month 6), RAG (Month 5), serving (Month 4), quantization (Month 4), all prior
+## Month 6 Project B: "EvalArena — Model, Cost, and Safety Battleground"
+**What:** A self-hosted arena that compares models across answer quality, latency, cost, safety, and tool-use reliability.
+**Novelty:** Most arenas ask "which answer is better?" This asks "which model should I deploy for this workload?" by combining human votes, LLM-as-judge, safety checks, latency, and dollar cost.
+**Skills used:** Agents/tool use (Month 6), safety/guardrails (Month 6), RAG (Month 5), serving metrics (Month 5), quantization/cost tradeoffs (Month 4), evaluation basics (all prior)
 **Deliverables:**
-- [ ] Load any 2+ models (HuggingFace, GGUF, NIM endpoint)
-- [ ] Side-by-side comparison UI: same prompt → both models answer → user votes
-- [ ] ELO rating system with confidence intervals
-- [ ] Automatic LLM-as-judge evaluation running in parallel
-- [ ] Human vs AI judge agreement analysis
-- [ ] Category breakdown: coding, math, reasoning, creative, safety
-- [ ] **Publish with web UI + demo**
+- [ ] Load HuggingFace, GGUF, NIM, vLLM, or OpenAI-compatible endpoints
+- [ ] Side-by-side comparison UI with blind human voting
+- [ ] Automated LLM-as-judge with agreement analysis against human votes
+- [ ] Cost/latency/TTFT/TPOT dashboard per model
+- [ ] Safety and refusal tests using guardrail policies
+- [ ] Tool-use benchmark: function calling correctness and argument validity
+- [ ] ELO-style leaderboard plus workload-specific recommendation: cheapest acceptable model
+- [ ] **Publish with web UI, seed eval set, and reproducible reports**
 
 ---
 
-## Month 7 Project A: "VisionChat — Multi-Modal AI Assistant"
-**What:** An AI assistant that understands text, images, documents, and audio.
-**Novelty:** **Modality router** — automatically detects input type and routes to the right model pipeline. Most multi-modal demos are hardcoded for one input type. Yours handles mixed inputs in a single conversation.
+## Month 7 Project A: "IncidentLens — Multimodal AI Debugging Assistant"
+**What:** A multimodal assistant for debugging ML/system incidents from screenshots, logs, traces, code snippets, PDFs, and spoken notes.
+**Novelty:** Turns messy incident evidence into a root-cause timeline: "screenshot shows OOM, logs show batch size jump, profiler trace shows HBM pressure, docs explain the config knob."
 **Deliverables:**
-- [ ] Image understanding: describe, answer questions about images (LLaVA-style or via NIM)
-- [ ] Document understanding: extract info from PDFs with tables and charts
-- [ ] Audio: Riva ASR for speech input, Riva TTS for speech output
-- [ ] Mixed-input conversations: "Here's a photo of my error screen [image], what's wrong?"
-- [ ] GPU-accelerated: DALI for image preprocessing, NIM for inference
-- [ ] Modality router with confidence scores
-- [ ] **Publish with web UI (Gradio/Streamlit)**
+- [ ] Input router for screenshots, logs, PDFs, traces, code snippets, and voice notes
+- [ ] Image understanding for error screenshots and dashboard captures
+- [ ] Log parser that extracts exceptions, timestamps, GPU IDs, OOMs, latency spikes
+- [ ] Document/PDF lookup for relevant runbooks or API docs
+- [ ] RAG-backed root-cause report with cited evidence
+- [ ] Suggested fix plan ranked by risk and expected impact
+- [ ] GPU-accelerated preprocessing with DALI where useful, NIM/VLM for inference
+- [ ] **Publish with 5 real or simulated incident case studies**
 
 ## Month 7 Project B: "GPU-Accelerated PDF Intelligence"
 **What:** A pipeline that takes any PDF (research papers, financial reports, technical docs) and extracts ALL content — text, tables, charts, images, equations — using GPU-accelerated processing, then makes it searchable and question-answerable.
@@ -349,7 +355,7 @@ Every monthly project README should include:
 
 ## Month 8 Project A: "MoE-Lab — Mixture of Experts Playground"
 **What:** Train and analyze Mixture of Experts models at small scale, with tools to visualize expert specialization.
-**Novelty:** **Expert specialization visualizer** — shows WHAT each expert learned (which types of tokens/topics activate which experts). Nobody provides this level of MoE interpretability.
+**Novelty:** **Expert specialization visualizer** — shows WHAT each expert learned: which token types, topics, or tasks activate each expert, and how routing changes during training.
 **Deliverables:**
 - [ ] MoE Transformer implementation (top-2 routing, load balancing loss)
 - [ ] Training on diverse text corpus (code + English + math)
@@ -386,16 +392,18 @@ Every monthly project README should include:
 - [ ] Integration: drop-in replacement for `nn.Module` subclasses
 - [ ] **Publish as pip-installable library with CI benchmarks**
 
-## Month 9 Project B: "PyTorch-to-Triton Auto-Converter"
-**What:** A tool that takes a PyTorch `nn.Module` and automatically generates a fused Triton kernel for its forward pass, benchmarks it, and shows the speedup.
-**Novelty:** Automatic kernel fusion — you give it a sequence of PyTorch ops (LayerNorm → dropout → linear → GELU), it generates ONE fused Triton kernel. Like a mini torch.compile but transparent and educational.
-**Skills used:** Triton (Month 9), torch.compile understanding (Month 9), CUDA kernels (Month 1-4), profiling (Month 2), all prior
+## Month 9 Project B: "FusionLab — Transparent PyTorch-to-Triton Fusion Playground"
+**What:** A tool that takes common LLM op patterns and shows how they can be fused into Triton kernels, with generated code, benchmarks, and explanations.
+**Novelty:** A transparent mini-compiler for learning and benchmarking fusion. Instead of pretending to replace `torch.compile`, it teaches exactly why fusion helps and when it fails.
+**Skills used:** Triton (Month 9), torch.compile/Inductor concepts (Month 9), CUDA kernels (Month 1-4), profiling (Month 2), all prior
 **Deliverables:**
-- [ ] Input: any `nn.Module` with element-wise + normalization ops
-- [ ] Output: fused Triton kernel + benchmark vs unfused PyTorch
-- [ ] Support: RMSNorm+residual, GELU+linear, SiLU+multiply (LLM patterns)
-- [ ] Show generated Triton code (educational: see what fusion looks like)
-- [ ] **Publish to GitHub as pip-installable tool**
+- [ ] Pattern matcher for common LLM blocks: RMSNorm+residual, RoPE, SwiGLU, GELU, dropout+add
+- [ ] Generated Triton code shown side-by-side with original PyTorch
+- [ ] Benchmark vs eager PyTorch and `torch.compile`
+- [ ] Memory-traffic report: bytes read/written before and after fusion
+- [ ] Correctness tests with tolerance checks across FP32/FP16/BF16
+- [ ] Explanation panel: why this fusion helps, why it may not, and what hardware limit appears
+- [ ] **Publish as an educational benchmarking tool**
 
 ---
 
@@ -537,7 +545,7 @@ Every monthly project README should include:
 - [ ] NIM for LLM inference (multiple models: fast + powerful)
 - [ ] NeMo Retriever for RAG (embedding + reranking)
 - [ ] NeMo Guardrails for safety (Colang 2.0 rules)
-- [ ] AgentIQ patterns for agent orchestration
+- [ ] NVIDIA AIQ / Agent Intelligence Toolkit patterns for agent orchestration
 - [ ] Riva for voice interface (ASR + TTS)
 - [ ] Tools: code execution, web search, database query, file operations
 - [ ] Multi-agent: specialized sub-agents for different tasks
@@ -610,14 +618,14 @@ Every monthly project README should include:
 | Month | Project A | ✓ | Project B | ✓ |
 |-------|-----------|---|-----------|---|
 | 1 | GPU Matrix Math Engine | ⬜ | LLM Inference Cost Simulator | ⬜ |
-| 2 | nanoLLM — GPT from Scratch | ⬜ | Attention Visualizer | ⬜ |
+| 2 | nanoLLM — GPT from Scratch | ⬜ | TransformerScope — LLM Behavior Debugger | ⬜ |
 | 3 | LLM Surgery — Fine-Tuning Toolkit | ⬜ | TokenScope — Tokenizer Analyzer | ⬜ |
 | 4 | QuantBench — Quantization Analyzer | ⬜ | LLM-Speedometer — Inference Profiler | ⬜ |
-| 5 | DeepRAG — Production RAG | ⬜ | DocuMind — Research Assistant | ⬜ |
-| 6 | AgentForge — Multi-Agent Platform ⭐ | ⬜ | LLM-Arena — Model Battleground | ⬜ |
-| 7 | VisionChat — Multi-Modal Assistant | ⬜ | GPU-Accelerated PDF Intelligence | ⬜ |
+| 5 | DeepRAG — Production RAG | ⬜ | RAGTrace — Retrieval Debugger | ⬜ |
+| 6 | AgentForge — Multi-Agent Platform ⭐ | ⬜ | EvalArena — Model/Cost/Safety Battleground | ⬜ |
+| 7 | IncidentLens — Multimodal Debugging Assistant | ⬜ | GPU-Accelerated PDF Intelligence | ⬜ |
 | 8 | MoE-Lab — Expert Specialization | ⬜ | ArchSearch — Architecture Comparator | ⬜ |
-| 9 | KernelSmith — Triton Kernel Library | ⬜ | PyTorch-to-Triton Auto-Converter | ⬜ |
+| 9 | KernelSmith — Triton Kernel Library | ⬜ | FusionLab — Triton Fusion Playground | ⬜ |
 | 10 | TrainScale — Distributed Training | ⬜ | TrainWatch — Training Debugger | ⬜ |
 | 11 | PaperBot — Paper Implementer | ⬜ | Paper2Benchmark — Reproducibility Tool | ⬜ |
 | 12 | ReasonEngine — Test-Time Compute | ⬜ | ThinkTrace — Reasoning Visualizer | ⬜ |
@@ -719,7 +727,7 @@ Every monthly project README should include:
 ---
 
 ### Month 6 — AI Agents + NVIDIA AI Ecosystem ⭐ (6-MONTH MILESTONE)
-**Focus:** Function calling, ReAct pattern, agent memory (short-term, long-term), planning (Tree of Thought, plan-and-execute), LangChain, LlamaIndex, multi-agent systems (CrewAI, AutoGen), NVIDIA AgentIQ, code-executing agents, agent safety, NVIDIA NIM, NeMo Framework, NeMo Guardrails, RAPIDS, DALI, Riva (ASR+TTS), ACE, AI Blueprints, Dynamo, NGC, build.nvidia.com
+**Focus:** Function calling, ReAct pattern, agent memory (short-term, long-term), planning (Tree of Thought, plan-and-execute), LangChain, LlamaIndex, multi-agent systems (CrewAI, AutoGen), NVIDIA AIQ / Agent Intelligence Toolkit, code-executing agents, agent safety, NVIDIA NIM, NeMo Framework, NeMo Guardrails, RAPIDS, DALI, Riva (ASR+TTS), ACE, AI Blueprints, Dynamo, NGC, build.nvidia.com
 **Project:** AgentForge — Multi-Agent AI Platform
 
 **After this month, you can:**
@@ -737,7 +745,7 @@ Every monthly project README should include:
 
 ### Month 7 — Multi-Modal AI + Knowledge Distillation + Diffusion Overview
 **Focus:** CLIP (contrastive image-text), Vision Transformers (ViT), LLaVA (visual instruction tuning), document understanding, video understanding, audio (Whisper, Riva), DALI for image loading, teacher-student distillation, feature distillation, model merging (SLERP, TIES, DARE), model soups, synthetic data generation basics, diffusion models overview (DDPM, latent diffusion, Stable Diffusion), DiT
-**Project:** VisionChat — Multi-Modal AI Assistant
+**Project:** IncidentLens — Multimodal AI Debugging Assistant
 
 **After this month, you can:**
 - [ ] Build AI that understands images, documents, audio, and video in a single conversation
@@ -830,7 +838,7 @@ Every monthly project README should include:
 ---
 
 ### Month 13 — Production LLM Serving + Advanced Alignment + Enterprise Agents
-**Focus:** NIM auto-scaling, multi-model serving, semantic caching, A/B testing with statistical significance, Guardrails advanced (Colang 2.0), AgentIQ enterprise patterns, MCP (Model Context Protocol), agent fine-tuning, tool-use training, advanced alignment (SPIN, ORPO, SimPO, iterative DPO), reward hacking prevention
+**Focus:** NIM auto-scaling, multi-model serving, semantic caching, A/B testing with statistical significance, Guardrails advanced (Colang 2.0), NVIDIA AIQ enterprise patterns, MCP (Model Context Protocol), agent fine-tuning, tool-use training, advanced alignment (SPIN, ORPO, SimPO, iterative DPO), reward hacking prevention
 **Project:** NVServe — Production LLM Serving Platform
 
 **After this month, you can:**
@@ -862,7 +870,7 @@ Every monthly project README should include:
 ---
 
 ### Month 15 — Enterprise AI Agents (Full NVIDIA Stack)
-**Focus:** NIM (LLM + embedding + reranking), NeMo Guardrails (Colang 2.0), AgentIQ orchestration, Riva voice I/O, multi-agent coordination, agent capability benchmarking across 10 dimensions, advanced evaluation
+**Focus:** NIM (LLM + embedding + reranking), NeMo Guardrails (Colang 2.0), NVIDIA AIQ orchestration, Riva voice I/O, multi-agent coordination, agent capability benchmarking across 10 dimensions, advanced evaluation
 **Project:** AgentX — Enterprise AI Agent with Full NVIDIA Stack
 
 **After this month, you can:**
@@ -1344,7 +1352,7 @@ Every monthly project README should include:
 - [ ] Revise LLaMA architecture: RMSNorm, RoPE, SwiGLU, GQA
 - [ ] Re-read your GPT-2 implementation, understand every line
 - [ ] **Build Monthly Project A:** nanoLLM — GPT from Scratch
-- [ ] **Build Monthly Project B:** Attention Visualizer
+- [ ] **Build Monthly Project B:** TransformerScope — LLM Behavior Debugger
 - [ ] Push both projects to GitHub
 
 ---
@@ -1841,12 +1849,12 @@ Every monthly project README should include:
 - [ ] LlamaIndex: document ingestion, query engines, data agents
 - [ ] **Code:** Multi-tool agent with LangChain
 
-### Day 5 — Multi-Agent Systems & NVIDIA AgentIQ
+### Day 5 — Multi-Agent Systems & NVIDIA AIQ
 - [ ] CrewAI: role assignment, task definition
 - [ ] AutoGen: conversable agents, group chat
-- [ ] NVIDIA AgentIQ: toolkit for building enterprise AI agents
+- [ ] NVIDIA AIQ / Agent Intelligence Toolkit: toolkit for building enterprise AI agents
 - [ ] Human-in-the-loop
-- [ ] **Code:** Multi-agent research + writing system, explore AgentIQ examples
+- [ ] **Code:** Multi-agent research + writing system, explore NVIDIA AIQ examples
 
 ### 🔨 Saturday Project
 - [ ] **Research Agent**
@@ -2013,7 +2021,7 @@ Every monthly project README should include:
 - [ ] Revise full NVIDIA stack: NIM, NeMo, Guardrails, Retriever, Riva, ACE
 - [ ] Re-run your best agent, try to improve it
 - [ ] **Build Monthly Project A:** DeepRAG — Production RAG
-- [ ] **Build Monthly Project B:** DocuMind — Research Assistant
+- [ ] **Build Monthly Project B:** RAGTrace — Retrieval Debugger
 - [ ] Push both projects to GitHub
 
 ---
@@ -2139,7 +2147,7 @@ Every monthly project README should include:
 - [ ] Revise long context: RoPE scaling, Flash Attention, Mamba/SSM
 - [ ] Revise distillation, model merging, synthetic data
 - [ ] **Build Monthly Project A:** AgentForge — Multi-Agent Platform
-- [ ] **Build Monthly Project B:** LLM-Arena — Model Battleground
+- [ ] **Build Monthly Project B:** EvalArena — Model/Cost/Safety Battleground
 - [ ] Push both projects to GitHub
 - [ ] **Write a "6-month retrospective" blog post summarizing your journey**
 
@@ -2445,7 +2453,7 @@ Every monthly project README should include:
 
 ### Topics
 - [ ] NVIDIA ACE (Avatar Cloud Engine): AI-powered digital humans
-- [ ] NVIDIA AgentIQ: toolkit for building enterprise AI agents
+- [ ] NVIDIA AIQ / Agent Intelligence Toolkit: toolkit for building enterprise AI agents
 - [ ] NVIDIA NeMo Guardrails: advanced Colang 2.0, custom actions, KB integration
 - [ ] NVIDIA NIM Agent Blueprints: pre-built agentic AI workflows
 - [ ] Model Context Protocol (MCP): standardized tool interfaces for agents
@@ -2462,7 +2470,7 @@ Every monthly project README should include:
 - [ ] Deploy using NVIDIA NIM Agent Blueprint
 
 ### 🔨 Saturday Projects
-- [ ] **Week 45:** Enterprise AI agent with full NVIDIA stack (NIM + Guardrails + AgentIQ + Retriever)
+- [ ] **Week 45:** Enterprise AI agent with full NVIDIA stack (NIM + Guardrails + AIQ + Retriever)
 - [ ] **Week 46:** Multi-agent software engineering system (SWE-bench style)
 
 ### 📄 Sunday Papers
@@ -2778,7 +2786,7 @@ Every monthly project README should include:
 - [ ] **NV-Shield** — content safety classification (if available)
 
 ### Agents & Applications
-- [ ] **AgentIQ** — enterprise AI agent toolkit
+- [ ] **NVIDIA AIQ / Agent Intelligence Toolkit** — enterprise AI agent toolkit, formerly AgentIQ
 - [ ] **NIM Agent Blueprints** — pre-built agentic AI workflows
 - [ ] **NVIDIA AI Blueprints** — reference architectures (RAG, digital human, etc.)
 - [ ] **NVIDIA Tokkio** — customer service AI agent platform
