@@ -1,9 +1,30 @@
-# LLM + CUDA + Hardware Mastery Tracker
+# LLM + CUDA + Hardware Mastery Roadmap
 
 > **Daily: 2-3 hours** | **Saturday: 3-4 hrs project** | **Sunday: 1-2 hrs papers (optional)**
-> **Duration:** ~18 months | **6-month milestone:** Impressive projects, solid understanding
+> **Duration:** ~18-24 months | **6-month milestone:** serious systems projects + strong LLM/GPU fundamentals
 > **After each month:** 1 week revision buffer to revisit weak areas + complete monthly projects
-> **Projects:** 1 weekly project + **2 monthly projects** (novel, cumulative, portfolio-grade)
+> **Projects:** 1 weekly project + **2 monthly projects** (novel, cumulative, useful to other people)
+
+---
+
+## North Star
+
+Become the kind of LLM systems engineer who can reason across the full stack:
+
+```text
+model behavior -> Transformer math -> PyTorch ops -> CUDA/Triton kernels
+-> GPU memory behavior -> serving/runtime tradeoffs -> product-quality systems
+```
+
+After this roadmap, you should not merely "know LLMs." You should be able to:
+
+- Build models, training loops, inference systems, RAG systems, agents, and GPU kernels from first principles
+- Explain performance using hardware facts instead of vague guesses
+- Read new papers and turn them into working code
+- Build tools that save other engineers time, money, debugging effort, or learning effort
+- Ship portfolio projects that look like real open-source products, not course assignments
+
+The journey is deliberately hard. The reward is rare judgment: you will understand both **what the model is doing** and **why the GPU/system behaves the way it does**.
 
 ---
 
@@ -17,7 +38,86 @@
 - If a day takes longer, split it across 2 days — no rush
 - **After every month:** take 1 extra week to revise everything from that month + previous months
 - **Monthly projects:** complete 2 per month — each must use skills from current AND previous months
-- **Use AI (Cursor/Claude)** as your tutor, code reviewer, and paper explainer throughout
+- **Use AI (Cursor/Codex/Claude)** as your tutor, code reviewer, paper explainer, and ruthless reviewer
+- Keep a short engineering journal: what you built, what broke, what you measured, what you would change
+- For every serious project, write a public-quality README and at least one technical note or blog post
+
+---
+
+## Project Philosophy: Novel + Useful + Cumulative
+
+Every month has two projects because expertise needs two muscles:
+
+- **Project A:** deep implementation of the main technical theme
+- **Project B:** a useful tool/product that packages the learning for other people
+
+For Month `N`, both projects must use Month `1...N` skills. The project should have visible evidence of that cumulative learning:
+
+- **Month 1+ hardware proof:** benchmarks, roofline thinking, memory/compute bottleneck analysis
+- **Month 2+ model proof:** Transformer/LLM internals, training/inference behavior, profiling
+- **Month 3+ optimization proof:** custom CUDA/Triton extension, Flash Attention idea, distributed/fine-tuning awareness
+- **Month 4+ compression proof:** quantization/PEFT/cost-vs-quality tradeoff
+- **Month 5+ product proof:** serving, RAG, latency, evaluation, deployment ergonomics
+- **Month 6+ agent proof:** tool use, memory, observability, safety, evaluation
+- **Month 7+ multimodal proof:** text/image/document/audio routing where useful
+- **Month 9+ kernel proof:** measurable custom kernel or compiler/fusion insight
+- **Month 10+ scale proof:** distributed, multi-GPU, failure diagnosis, cost model
+- **Month 11+ research proof:** paper-to-code implementation or reproducibility analysis
+- **Month 13+ production proof:** monitoring, routing, guardrails, API design, cost tracking
+- **Month 16+ community proof:** external users, docs, issues, PRs, adoption
+
+### Novelty Scorecard
+
+Before starting any monthly project, fill this in. If the score is weak, redesign the project.
+
+| Question | Must Be True |
+|----------|--------------|
+| Who is this for? | A specific user exists: ML engineer, researcher, student, infra engineer, startup, etc. |
+| What pain does it remove? | It saves time, money, debugging effort, learning effort, or deployment risk |
+| What is new about it? | A new combination, clearer visualization, better automation, better benchmark, or missing open-source tool |
+| What will I measure? | Speed, cost, quality, accuracy, memory, latency, user time saved, or reproducibility |
+| What previous months are visible? | The README explicitly says which Month 1...N skills appear and where |
+| Can someone else use it? | It has setup instructions, examples, tests, and sane defaults |
+| Would I be proud to show it in an interview? | The answer must be yes before calling it done |
+
+### Definition Of Done For Monthly Projects
+
+A monthly project is not done when the code "runs once." It is done when it has:
+
+- [ ] Clear problem statement: who it helps and why it matters
+- [ ] Working MVP with a reproducible setup command
+- [ ] Benchmarks or evaluation against at least one baseline
+- [ ] Architecture diagram or system overview
+- [ ] Cumulative-learning section: "Skills from Month 1...N used here"
+- [ ] Tests or validation scripts for the core behavior
+- [ ] Failure analysis: where it breaks, limits, tradeoffs, next improvements
+- [ ] Demo: notebook, CLI, web UI, screenshots, or video
+- [ ] Public-quality README with install, usage, examples, and results
+- [ ] One short technical write-up explaining the hardest idea
+
+### Anti-Tutorial Rule
+
+You may learn from tutorials, but final projects must not look like tutorials. To pass:
+
+- Add one original feature that solves a real user pain
+- Compare against a baseline and publish the numbers
+- Explain a design decision using hardware/model/system reasoning
+- Make the project reusable by someone who is not you
+
+### Expertise Gates
+
+Use these gates to decide whether you are truly leveling up:
+
+| Point | You Should Be Able To Do |
+|-------|---------------------------|
+| End of Month 1 | Explain why a CUDA kernel is slow using memory access, occupancy, and bandwidth evidence |
+| End of Month 3 | Build and fine-tune a small Transformer, profile it, and replace one slow operation with custom CUDA/Triton |
+| End of Month 6 | Ship an end-to-end AI application with serving, RAG/agents, safety, observability, and evaluation |
+| End of Month 10 | Reason about multi-GPU training/inference systems, cost, throughput, bottlenecks, and failure modes |
+| End of Month 13 | Design production LLM infrastructure with routing, caching, monitoring, alignment, and guardrails |
+| End of Month 18 | Lead a serious LLM systems project from idea to benchmarked, documented, usable release |
+
+If a gate feels weak, pause and build one more small project before moving on. Speed is less important than compounding correctly.
 
 ---
 
@@ -47,6 +147,17 @@
 > **Project A** = structured (detailed below). **Project B** = novel second project (also detailed below).
 > Both must use current month + all previous month skills. Built during revision week.
 
+Each project description below is a starting brief, not a cage. If you discover a sharper user pain while studying, improve the project, but keep the cumulative rule: Month `N` must visibly use Month `1...N`.
+
+Every monthly project README should include:
+
+- **User:** who this helps
+- **Pain:** what annoying/expensive/confusing thing it fixes
+- **Novelty:** what is different from existing tools or tutorials
+- **Cumulative skills:** which months are used and where in the code
+- **Evidence:** benchmark, evaluation, demo, screenshots, or reproducibility report
+- **Next users:** how someone else can install it, run it, and trust it
+
 ---
 
 ## Month 1 Project: "GPU Matrix Math Engine"
@@ -62,7 +173,7 @@
 
 ## Month 1 Project B: "LLM Inference Cost Simulator"
 **What:** A visual, interactive tool that simulates what happens inside a GPU during LLM inference — showing memory reads, Tensor Core utilization, and bottlenecks in real time.
-**Novelty:** Nobody has a visual simulator that shows "here's why your 7B model runs at 250 tok/s on H100 but only 60 tok/s on T4" with animated data flow diagrams.
+**Novelty:** Make the hidden bottleneck visible: "here's why your 7B model runs at 250 tok/s on H100 but only 60 tok/s on T4" with animated data flow diagrams and transparent formulas.
 **Skills used:** CUDA memory hierarchy (Month 1), roofline model (Month 1), arithmetic intensity (Month 1), GPU architecture (Month 1)
 **Deliverables:**
 - [ ] Input: model config (params, layers, hidden dim) + GPU config (bandwidth, TFLOPS, HBM size)
@@ -114,7 +225,7 @@
 
 ## Month 3 Project B: "TokenScope — Tokenizer Analyzer & Comparison Tool"
 **What:** A tool that takes any text and shows how different tokenizers (GPT-2, LLaMA, Mistral, tiktoken) split it, with efficiency metrics, custom Triton kernel for fast tokenization stats, and insights on why some models handle certain languages better.
-**Novelty:** Visual side-by-side comparison of 4+ tokenizers on the same text + a "tokenization efficiency score" per language/domain. Nobody has a unified comparison tool.
+**Novelty:** Visual side-by-side comparison of 4+ tokenizers on the same text + a "tokenization efficiency score" per language/domain, focused on practical model-selection decisions.
 **Skills used:** BPE tokenization (Month 1), Triton kernels (Month 3), custom CUDA extensions (Month 3), Flash Attention understanding (Month 3), LLM fine-tuning (Month 3)
 **Deliverables:**
 - [ ] Side-by-side tokenization of 4+ tokenizers on same input
@@ -128,7 +239,7 @@
 
 ## Month 4 Project A: "QuantBench — The Quantization Analyzer"
 **What:** A tool that takes ANY HuggingFace model and quantizes it across multiple methods, then generates a comprehensive quality-vs-speed report.
-**Novelty:** Nobody has a **single tool** that runs GPTQ, AWQ, GGUF, and FP8 on the same model and generates a unified comparison dashboard. You're building the definitive quantization benchmark tool.
+**Novelty:** A single workflow that runs GPTQ, AWQ, GGUF, and FP8 on the same model and generates a unified quality/speed/memory dashboard. You're building the quantization benchmark tool you wish existed.
 **Deliverables:**
 - [ ] Support for GPTQ (4-bit, 8-bit), AWQ (4-bit), GGUF (Q4_K_M, Q5_K_M, Q8_0)
 - [ ] FP8 quantization with Transformer Engine (if Hopper GPU available)
@@ -290,7 +401,7 @@
 
 ## Month 10 Project A: "TrainScale — Distributed LLM Training Framework"
 **What:** A simplified but functional distributed training framework that supports data parallelism + tensor parallelism.
-**Novelty:** **Training cost estimator** — given a model config, dataset size, and GPU type, predicts training time, cost, and optimal parallelism strategy BEFORE you start training. Nobody has a good open-source tool for this.
+**Novelty:** **Training cost estimator** — given a model config, dataset size, and GPU type, predicts training time, cost, and optimal parallelism strategy BEFORE you start training.
 **Deliverables:**
 - [ ] Data-parallel training with gradient sync
 - [ ] Tensor-parallel linear layers (column + row parallel)
@@ -342,7 +453,7 @@
 
 ## Month 12 Project A: "ReasonEngine — Test-Time Compute for Better Answers"
 **What:** A system that makes any LLM dramatically smarter at hard problems by spending more compute at inference time.
-**Novelty:** **Adaptive compute budget** — automatically detects question difficulty and allocates compute accordingly. Easy question = 1 pass. Hard math = 64 samples + MCTS + verification. Nobody has a clean, open-source adaptive test-time compute system.
+**Novelty:** **Adaptive compute budget** — automatically detects question difficulty and allocates compute accordingly. Easy question = 1 pass. Hard math = 64 samples + MCTS + verification.
 **Deliverables:**
 - [ ] Difficulty classifier: predicts how hard a question is (few-shot, embedding-based)
 - [ ] Multiple strategies: best-of-N, self-consistency, Tree of Thought, MCTS
@@ -407,7 +518,7 @@
 
 ## Month 14 Project B: "DataScope — Training Data Quality Analyzer"
 **What:** A tool that analyzes any text dataset and generates a quality report: deduplication rate, language distribution, toxicity score, domain balance, contamination check (is benchmark data leaked?), and recommends optimal data mix.
-**Novelty:** "Your dataset is 40% duplicate, 12% low-quality, and contains 3% MMLU test questions (contaminated!)" — nobody has a one-command data quality audit tool.
+**Novelty:** "Your dataset is 40% duplicate, 12% low-quality, and contains 3% MMLU test questions (contaminated!)" — a one-command data quality audit with actionable fixes.
 **Skills used:** Synthetic data (Month 14), NeMo Curator (Month 14), embeddings (Month 5), GPU-accelerated processing (Month 1+), all prior
 **Deliverables:**
 - [ ] Input: any text dataset (jsonl, parquet, HuggingFace dataset)
@@ -620,7 +731,7 @@
 - [ ] Build voice-enabled AI with Riva ASR + TTS
 - [ ] Deploy reference architectures using NVIDIA AI Blueprints
 - [ ] Navigate the full NVIDIA AI ecosystem: NGC, NIM, NeMo, Triton, Dynamo, Riva, ACE
-- [ ] **You now have 14+ portfolio projects and can build real AI applications end-to-end**
+- [ ] **You now have 12 monthly capstones plus weekly builds, and can build real AI applications end-to-end**
 
 ---
 
@@ -2020,7 +2131,7 @@
 - [ ] Can implement RLHF/DPO/GRPO alignment pipelines
 - [ ] Can implement chain-of-thought and reasoning techniques
 - [ ] Can read and understand most AI papers
-- [ ] **Have 14+ impressive projects in portfolio**
+- [ ] **Have 12+ impressive monthly capstones plus weekly builds in portfolio**
 
 ## 🔄 Buffer Week (Month 6 Revision) ⭐ 6-MONTH MILESTONE
 - [ ] Revise RLHF pipeline: RL basics, PPO, GRPO, reward models
@@ -2575,7 +2686,7 @@
 - [ ] PEFT (HuggingFace)
 - [ ] flash-attention (Dao-AILab)
 
-## All 34 Papers (Master Reading List)
+## Master Reading List (38 Papers)
 - [ ] 1. "Attention Is All You Need" (Vaswani, 2017)
 - [ ] 2. "BERT" (Devlin, 2018)
 - [ ] 3. "GPT-2" (Radford, 2019)
