@@ -58,7 +58,7 @@ For Month `N`, both projects must use Month `1...N` skills. The project should h
 - **Month 3+ optimization proof:** custom CUDA/Triton extension, Flash Attention idea, distributed/fine-tuning awareness
 - **Month 4+ compression proof:** quantization/PEFT/cost-vs-quality tradeoff
 - **Month 5+ product proof:** serving, RAG, latency, evaluation, deployment ergonomics
-- **Month 6+ agent proof:** tool use, memory, observability, safety, evaluation
+- **Month 6+ reasoning proof:** tool use, memory, observability, safety, RLHF/reasoning evaluation
 - **Month 7+ multimodal proof:** text/image/document/audio routing where useful
 - **Month 9+ kernel proof:** measurable custom kernel or compiler/fusion insight
 - **Month 10+ scale proof:** distributed, multi-GPU, failure diagnosis, cost model
@@ -112,7 +112,7 @@ Use these gates to decide whether you are truly leveling up:
 |-------|---------------------------|
 | End of Month 1 | Explain why a CUDA kernel is slow using memory access, occupancy, and bandwidth evidence |
 | End of Month 3 | Build and fine-tune a small Transformer, profile it, and replace one slow operation with custom CUDA/Triton |
-| End of Month 6 | Ship an end-to-end AI application with serving, RAG/agents, safety, observability, and evaluation |
+| End of Month 6 | Ship an end-to-end AI application with serving, RAG/agents, reasoning, safety, observability, and evaluation |
 | End of Month 10 | Reason about multi-GPU training/inference systems, cost, throughput, bottlenecks, and failure modes |
 | End of Month 13 | Design production LLM infrastructure with routing, caching, monitoring, alignment, and guardrails |
 | End of Month 18 | Lead a serious LLM systems project from idea to benchmarked, documented, usable release |
@@ -135,19 +135,24 @@ If a gate feels weak, pause and build one more small project before moving on. S
 ---
 
 # ═══════════════════════════════════════════════════════════
-# MONTHLY CAPSTONE PROJECTS (Portfolio-Grade, Novel, Useful)
+# MONTHLY CAPSTONE PROJECT CATALOG (Build Only When Reached)
 # ═══════════════════════════════════════════════════════════
 
 > **TWO projects per month.** Each must combine skills from the current month AND
 > all previous months. Each must have a **novelty angle** — something that isn't
 > just a tutorial copy-paste but demonstrates real understanding and creativity.
-> Build during the **revision week** at the end of each month.
+> This is a catalog of future project briefs. Build each project only during the
+> **revision week** after the required weeks have been completed.
 > These are the projects you put on your resume and GitHub.
 >
 > **Project A** = structured (detailed below). **Project B** = novel second project (also detailed below).
 > Both must use current month + all previous month skills. Built during revision week.
 
 Each project description below is a starting brief, not a cage. If you discover a sharper user pain while studying, improve the project, but keep the cumulative rule: Month `N` must visibly use Month `1...N`.
+
+For strict chronological study, follow the **Phase 1 → Phase 6** weekly sections
+below. Treat this catalog as the project reference that each revision week points
+back to.
 
 Every monthly project README should include:
 
@@ -161,25 +166,32 @@ Every monthly project README should include:
 ---
 
 ## Month 1 Project: "GPU Matrix Math Engine"
-**What:** A CUDA library that implements GEMM at 5 optimization levels with a benchmarking dashboard.
-**Novelty:** Auto-selects the optimal kernel based on matrix dimensions (small → naive, large → tiled with shared memory). Generates an interactive roofline model plot for YOUR specific GPU, showing where each kernel sits.
+**When to build:** Month 1 revision week, after Weeks 1-4.
+**What:** A CUDA library that implements matrix operations and GEMM using only Month 1 concepts, with a benchmarking dashboard.
+**Novelty:** Auto-selects the best Month-1 kernel based on matrix dimensions and memory pattern. Generates a roofline-style plot for YOUR specific GPU using measured bandwidth/FLOPS from your own kernels.
 **Deliverables:**
-- [ ] 5 GEMM implementations: naive, coalesced, shared-memory tiled, register-tiled, cuBLAS wrapper
-- [ ] Automatic kernel selection heuristic based on matrix size
-- [ ] Python benchmark script generating roofline plot (matplotlib)
-- [ ] Nsight Compute report for each kernel (download and include)
+- [ ] 4 GEMM implementations: CPU baseline, naive GPU, coalesced GPU, shared-memory tiled GPU
+- [ ] Block-size and tile-size benchmark sweep with an automatic kernel selection heuristic
+- [ ] Python benchmark script generating roofline-style plot (matplotlib)
+- [ ] CUDA-event timing and effective bandwidth/FLOPS report for each kernel
 - [ ] README with performance analysis and architecture diagrams
+- [ ] **Future extension after Month 2:** add cuBLAS baseline and Nsight Compute report
+- [ ] **Future extension after Month 3:** add register-tiled or Triton kernel
 - [ ] **Publish to GitHub**
 
 ## Month 1 Project B: "LLM Inference Cost Simulator"
-**What:** A visual, interactive tool that simulates what happens inside a GPU during LLM inference — showing memory reads, Tensor Core utilization, and bottlenecks in real time.
-**Novelty:** Make the hidden bottleneck visible: "here's why your 7B model runs at 250 tok/s on H100 but only 60 tok/s on T4" with animated data flow diagrams and transparent formulas.
-**Skills used:** CUDA memory hierarchy (Month 1), roofline model (Month 1), arithmetic intensity (Month 1), GPU architecture (Month 1)
+**When to build:** Month 1 revision week, after Weeks 1-4.
+**What:** A visual, interactive tool that estimates LLM weight memory, bandwidth-bound decode speed, and GPU bottlenecks using only hardware facts you learned in Month 1.
+**Novelty:** Make the hidden bottleneck visible: "a 7B FP16 model needs roughly this many bytes, this much HBM bandwidth per generated token, and this is why decode can become memory-bound." Every number must come from a transparent formula.
+**Skills used:** CUDA memory hierarchy (Month 1), HBM bandwidth (Month 1), roofline thinking (Month 1), arithmetic intensity (Month 1), GPU architecture (Month 1)
 **Deliverables:**
-- [ ] Input: model config (params, layers, hidden dim) + GPU config (bandwidth, TFLOPS, HBM size)
-- [ ] Output: predicted tokens/sec, memory utilization %, compute utilization %, bottleneck identification
-- [ ] Animated visualization of data flowing: HBM → L2 → SM → Tensor Cores → back
-- [ ] Compare: FP32 vs FP16 vs INT4 on the same model/GPU combo
+- [ ] Input: parameter count, bytes per parameter, GPU HBM bandwidth, HBM capacity, approximate FLOPS
+- [ ] Output: model size, maximum memory-bound tokens/sec, memory fit/not-fit, bottleneck explanation
+- [ ] Animated visualization of data flowing: HBM → L2/cache → SM → registers/shared memory
+- [ ] Compare: 4-byte vs 2-byte weight storage scenarios (FP32-like vs FP16-like) and bandwidth pressure
+- [ ] Explain assumptions clearly: batch=1 decode, weights read once per token, ignoring KV-cache until Month 4/5
+- [ ] **Future extension after Month 4:** add INT8/INT4 quantization
+- [ ] **Future extension after Month 5:** add KV-cache, prefill/decode split, batching, and serving metrics
 - [ ] Web UI (Streamlit) or interactive notebook
 - [ ] **Publish to GitHub**
 
@@ -296,25 +308,29 @@ Every monthly project README should include:
 
 ---
 
-## Month 6 Project A: "AgentForge — Multi-Agent AI Platform" ⭐ (MILESTONE PROJECT)
-**What:** A platform where you can define AI agents with different roles, tools, and memory, and they collaborate to complete complex tasks.
-**Novelty:** **Agent performance profiler** — tracks every LLM call, tool use, reasoning step, and generates a visual trace showing exactly how agents collaborated (or failed), with cost tracking per agent. The key value is production-style observability, not just agent orchestration.
+## Month 6 Project A: "AgentForge — Reasoning Agent Platform" ⭐ (MILESTONE PROJECT)
+**When to build:** Month 6 revision week, after Weeks 21-26.
+**What:** A platform where tool-using agents solve difficult tasks with ReAct, chain-of-thought prompting, self-consistency, verifier scoring, and long-context retrieval.
+**Novelty:** **Reasoning performance profiler** — tracks every LLM call, tool use, reasoning branch, verifier score, retrieval step, and cost. It shows exactly why an agent succeeded or failed, not just the final answer.
 **Deliverables:**
 - [ ] Agent framework: define agents with roles, tools, system prompts
 - [ ] Tools: code execution (sandboxed), web search, file system, RAG retrieval, API calls
-- [ ] Multi-agent: supervisor pattern + peer collaboration
+- [ ] Reasoning modes: ReAct, chain-of-thought prompting, Tree of Thought, self-consistency
+- [ ] Multi-agent: supervisor pattern + peer collaboration for hard tasks
 - [ ] Memory: short-term (conversation), long-term (vector store), shared (between agents)
+- [ ] Verifier/reward scoring: rank candidate answers and reasoning paths
+- [ ] Long-context mode: retrieve or compress context when tasks exceed the model window
 - [ ] NeMo Guardrails integration for safety
-- [ ] **Visual execution trace**: Gantt-chart-style view of agent interactions
-- [ ] Cost tracker: tokens used per agent, cost per task
+- [ ] **Visual execution trace**: Gantt-chart-style view of agents, tools, reasoning branches, verifier decisions
+- [ ] Cost/latency tracker: tokens used per agent, cost per task, TTFT/TPOT where available
 - [ ] Streaming REST API with WebSocket for real-time agent output
-- [ ] Evaluate on 3 real tasks: research report, code debugging, data analysis
+- [ ] Evaluate on 3 real tasks: research report, code debugging, math/reasoning task
 - [ ] **Publish with demo video and live hosted demo**
 
 ## Month 6 Project B: "EvalArena — Model, Cost, and Safety Battleground"
 **What:** A self-hosted arena that compares models across answer quality, latency, cost, safety, and tool-use reliability.
 **Novelty:** Most arenas ask "which answer is better?" This asks "which model should I deploy for this workload?" by combining human votes, LLM-as-judge, safety checks, latency, and dollar cost.
-**Skills used:** Agents/tool use (Month 6), safety/guardrails (Month 6), RAG (Month 5), serving metrics (Month 5), quantization/cost tradeoffs (Month 4), evaluation basics (all prior)
+**Skills used:** Agents/tool use (Month 5), safety/guardrails (Month 5), RAG (Month 5), serving metrics (Month 5), quantization/cost tradeoffs (Month 4), RLHF/reasoning (Month 6), long-context evaluation (Month 6), evaluation basics (all prior)
 **Deliverables:**
 - [ ] Load HuggingFace, GGUF, NIM, vLLM, or OpenAI-compatible endpoints
 - [ ] Side-by-side comparison UI with blind human voting
@@ -322,6 +338,8 @@ Every monthly project README should include:
 - [ ] Cost/latency/TTFT/TPOT dashboard per model
 - [ ] Safety and refusal tests using guardrail policies
 - [ ] Tool-use benchmark: function calling correctness and argument validity
+- [ ] Reasoning benchmark: CoT/self-consistency/process-reward comparison on hard tasks
+- [ ] Long-context benchmark: passkey/NIAH/document QA with cost and latency
 - [ ] ELO-style leaderboard plus workload-specific recommendation: cheapest acceptable model
 - [ ] **Publish with web UI, seed eval set, and reproducible reports**
 
@@ -448,7 +466,7 @@ Every monthly project README should include:
 ## Month 11 Project B: "Paper2Benchmark — Auto-Generate Evaluations from Papers"
 **What:** Given an AI paper, automatically extract the claimed results, generate a benchmark script, and verify whether an open-source model achieves the reported numbers.
 **Novelty:** "Does LLaMA-3 actually score 79.2% on MMLU as the paper claims?" — auto-run the evaluation and compare. A reproducibility verification tool.
-**Skills used:** Paper reading (Month 11), agents (Month 6), evaluation (Month 10), RAG (Month 5), all prior
+**Skills used:** Paper reading (Month 11), agents (Month 5), evaluation (Month 10), RAG (Month 5), all prior
 **Deliverables:**
 - [ ] Parse paper → extract claimed benchmark scores
 - [ ] Auto-generate evaluation script using lm-evaluation-harness
@@ -474,7 +492,7 @@ Every monthly project README should include:
 ## Month 12 Project B: "ThinkTrace — Reasoning Chain Visualizer"
 **What:** A tool that takes any reasoning model's output (CoT, ToT, MCTS) and visualizes the reasoning TREE — showing which paths were explored, which were pruned, where the model backtracked, and the final answer path highlighted.
 **Novelty:** Reasoning is a black box. Your tool makes it visible. See the tree of thoughts, the dead ends, the winning path — all in an interactive graph.
-**Skills used:** Reasoning/MCTS (Month 12), process reward models (Month 12), agents (Month 6), all prior
+**Skills used:** Reasoning/MCTS (Month 12), process reward models (Month 12), agents (Month 5), all prior
 **Deliverables:**
 - [ ] Capture reasoning traces from CoT, ToT, MCTS, best-of-N
 - [ ] Interactive tree visualization (D3.js or similar)
@@ -501,7 +519,7 @@ Every monthly project README should include:
 ## Month 13 Project B: "CostGuard — LLM Cost Optimizer"
 **What:** A proxy that sits between your app and any LLM API, automatically routing queries to the cheapest model that can handle the complexity, with semantic caching, prompt compression, and cost tracking.
 **Novelty:** Automatic cost optimization. "This query is simple → route to Llama-8B ($0.0001). This needs reasoning → route to GPT-4 ($0.01)." Saves 60-80% on API costs.
-**Skills used:** Production serving (Month 13), model routing (Month 13), agents (Month 6), RAG (Month 5), quantization (Month 4), all prior
+**Skills used:** Production serving (Month 13), model routing (Month 13), agents (Month 5), RAG (Month 5), quantization (Month 4), all prior
 **Deliverables:**
 - [ ] Proxy server: OpenAI-compatible input, routes to cheapest capable model
 - [ ] Difficulty classifier: routes easy/medium/hard queries to appropriate model
@@ -622,7 +640,7 @@ Every monthly project README should include:
 | 3 | LLM Surgery — Fine-Tuning Toolkit | ⬜ | TokenScope — Tokenizer Analyzer | ⬜ |
 | 4 | QuantBench — Quantization Analyzer | ⬜ | LLM-Speedometer — Inference Profiler | ⬜ |
 | 5 | DeepRAG — Production RAG | ⬜ | RAGTrace — Retrieval Debugger | ⬜ |
-| 6 | AgentForge — Multi-Agent Platform ⭐ | ⬜ | EvalArena — Model/Cost/Safety Battleground | ⬜ |
+| 6 | AgentForge — Reasoning Agent Platform ⭐ | ⬜ | EvalArena — Model/Cost/Safety Battleground | ⬜ |
 | 7 | IncidentLens — Multimodal Debugging Assistant | ⬜ | GPU-Accelerated PDF Intelligence | ⬜ |
 | 8 | MoE-Lab — Expert Specialization | ⬜ | ArchSearch — Architecture Comparator | ⬜ |
 | 9 | KernelSmith — Triton Kernel Library | ⬜ | FusionLab — Triton Fusion Playground | ⬜ |
@@ -661,13 +679,14 @@ Every monthly project README should include:
 ---
 
 ### Month 2 — Transformers + GPT from Scratch + GPU Libraries + Profiling
-**Focus:** Full Transformer architecture (encoder + decoder), multi-head attention, positional encodings (sinusoidal, RoPE), GPT-2 implementation, cuBLAS, cuDNN, Tensor Cores (WMMA), Nsight Systems & Compute profiling, LLaMA architecture (RMSNorm, SwiGLU, GQA), scaling laws, mixed precision training (AMP, BF16), efficient data loading, CNNs
+**Focus:** Full Transformer architecture (encoder + decoder), multi-head attention, positional encodings (sinusoidal, RoPE), GPT-2 implementation, cuBLAS, cuDNN, Tensor Cores (WMMA), Nsight Systems & Compute profiling, LLaMA architecture (RMSNorm, SwiGLU, GQA), basic interpretability (attention maps, residual stream, logit lens), scaling laws, mixed precision training (AMP, BF16), efficient data loading, CNNs
 **Project:** nanoLLM — Your Own GPT from Scratch
 
 **After this month, you can:**
 - [ ] Implement a complete Transformer (encoder + decoder) from scratch — no `nn.MultiheadAttention`
 - [ ] Build and train GPT-2 (124M params) with KV-cache inference and all sampling strategies
 - [ ] Implement LLaMA-style model: RMSNorm, RoPE, SwiGLU, Grouped Query Attention
+- [ ] Build basic interpretability tools: attention heatmaps, residual-stream probes, logit lens
 - [ ] Use cuBLAS for high-performance GEMM and Tensor Cores via WMMA API
 - [ ] Profile GPU workloads: Nsight Systems (timeline) and Nsight Compute (kernel-level SOL analysis)
 - [ ] Train with mixed precision (FP16/BF16 AMP) and understand loss scaling
@@ -710,8 +729,8 @@ Every monthly project README should include:
 
 ---
 
-### Month 5 — Inference Serving + Retrieval-Augmented Generation (RAG)
-**Focus:** Inference analysis (prefill vs decode, TTFT, TPOT, throughput), TensorRT-LLM, vLLM, PagedAttention, speculative decoding, continuous batching, Triton Inference Server, NVIDIA Dynamo, vector search (FAISS GPU, cuVS), embeddings, RAG architecture, chunking, hybrid retrieval, re-ranking, Graph RAG, agentic RAG, Self-RAG, RAGAS evaluation
+### Month 5 — Inference Serving + RAG + Agents + NVIDIA Ecosystem
+**Focus:** Inference analysis (prefill vs decode, TTFT, TPOT, throughput), TensorRT-LLM, vLLM, PagedAttention, speculative decoding, continuous batching, Triton Inference Server, NVIDIA Dynamo, vector search (FAISS GPU, cuVS), embeddings, RAG architecture, chunking, hybrid retrieval, re-ranking, Graph RAG, agentic RAG, Self-RAG, RAGAS evaluation, function calling, ReAct, agent memory, multi-agent systems, NIM, NeMo, Guardrails, Riva, ACE, AI Blueprints, NGC, build.nvidia.com
 **Project:** DeepRAG — Production RAG with NVIDIA Stack
 
 **After this month, you can:**
@@ -722,38 +741,36 @@ Every monthly project README should include:
 - [ ] Implement hybrid retrieval (dense + BM25) with cross-encoder re-ranking
 - [ ] Build agentic RAG (model decides when to retrieve) and Graph RAG (knowledge graph traversal)
 - [ ] Evaluate RAG quality with RAGAS: faithfulness, relevance, correctness
+- [ ] Build AI agents with tools, memory, ReAct loops, and basic multi-agent coordination
+- [ ] Use NVIDIA NIM, NeMo Retriever, NeMo Guardrails, Riva, AI Blueprints, and NGC at a practical level
 - [ ] Serve models via REST API with benchmarked throughput and latency
 
 ---
 
-### Month 6 — AI Agents + NVIDIA AI Ecosystem ⭐ (6-MONTH MILESTONE)
-**Focus:** Function calling, ReAct pattern, agent memory (short-term, long-term), planning (Tree of Thought, plan-and-execute), LangChain, LlamaIndex, multi-agent systems (CrewAI, AutoGen), NVIDIA AIQ / Agent Intelligence Toolkit, code-executing agents, agent safety, NVIDIA NIM, NeMo Framework, NeMo Guardrails, RAPIDS, DALI, Riva (ASR+TTS), ACE, AI Blueprints, Dynamo, NGC, build.nvidia.com
-**Project:** AgentForge — Multi-Agent AI Platform
+### Month 6 — Distillation + RLHF + Reasoning + Long Context ⭐ (6-MONTH MILESTONE)
+**Focus:** Knowledge distillation, model merging, synthetic instruction data, RL foundations, PPO/GRPO, RLHF pipeline, chain-of-thought, Tree of Thought, self-consistency, process reward models, long-context evaluation, RoPE scaling, KV-cache compression, Mamba/SSM overview
+**Project:** AgentForge — Reasoning Agent Platform
 
 **After this month, you can:**
-- [ ] Build AI agents that reason, use tools, and maintain short-term + long-term memory
-- [ ] Orchestrate multi-agent systems with supervisor patterns and peer collaboration
-- [ ] Deploy any LLM with NVIDIA NIM in a single `docker run` command
-- [ ] Add safety guardrails using NeMo Guardrails with Colang
-- [ ] Use RAPIDS (cuDF, cuML, cuGraph) for GPU-accelerated data processing
-- [ ] Build voice-enabled AI with Riva ASR + TTS
-- [ ] Deploy reference architectures using NVIDIA AI Blueprints
-- [ ] Navigate the full NVIDIA AI ecosystem: NGC, NIM, NeMo, Triton, Dynamo, Riva, ACE
+- [ ] Distill a larger model into a smaller one and measure quality/speed tradeoffs
+- [ ] Merge fine-tuned models using SLERP, TIES, DARE, or model soups
+- [ ] Explain RLHF from SFT → reward model → PPO/GRPO with KL control
+- [ ] Implement reasoning methods: CoT, self-consistency, Tree of Thought, verifier scoring
+- [ ] Build agents that combine tools, memory, retrieval, and explicit reasoning strategies
+- [ ] Evaluate long-context behavior with NIAH/passkey/document-QA style tests
+- [ ] Explain RoPE scaling, KV-cache compression, and when Mamba/SSM-style models matter
 - [ ] **You now have 12 monthly capstones plus weekly builds, and can build real AI applications end-to-end**
 
 ---
 
-### Month 7 — Multi-Modal AI + Knowledge Distillation + Diffusion Overview
-**Focus:** CLIP (contrastive image-text), Vision Transformers (ViT), LLaVA (visual instruction tuning), document understanding, video understanding, audio (Whisper, Riva), DALI for image loading, teacher-student distillation, feature distillation, model merging (SLERP, TIES, DARE), model soups, synthetic data generation basics, diffusion models overview (DDPM, latent diffusion, Stable Diffusion), DiT
+### Month 7 — Multi-Modal AI + Diffusion Overview
+**Focus:** CLIP (contrastive image-text), Vision Transformers (ViT), LLaVA (visual instruction tuning), document understanding, video understanding, audio (Whisper, Riva), DALI for image loading, diffusion models overview (DDPM, latent diffusion, Stable Diffusion), DiT
 **Project:** IncidentLens — Multimodal AI Debugging Assistant
 
 **After this month, you can:**
 - [ ] Build AI that understands images, documents, audio, and video in a single conversation
 - [ ] Fine-tune CLIP on custom datasets and build vision-language models (CLIP + projection + LLM)
 - [ ] Extract information from PDFs with tables, charts, and images
-- [ ] Distill large models into smaller ones (teacher-student, feature distillation)
-- [ ] Merge fine-tuned models using SLERP, TIES, DARE
-- [ ] Generate synthetic training data with Self-Instruct and Evol-Instruct
 - [ ] Understand how diffusion models work (forward/reverse process, latent space, guidance)
 - [ ] Build multi-modal chatbots with automatic modality routing
 
@@ -1017,9 +1034,11 @@ Every monthly project README should include:
 
 ### 🔨 Saturday Project
 - [ ] **Tiled Matrix Multiplication in CUDA**
-  - [ ] Naive CPU, naive GPU, shared-memory tiled GPU, cuBLAS comparison
-  - [ ] Profile with Nsight Compute
-  - [ ] Generate roofline model plot for your GPU
+  - [ ] Naive CPU, naive GPU, coalesced GPU, shared-memory tiled GPU
+  - [ ] Time with CUDA events and report effective bandwidth/FLOPS
+  - [ ] Generate a simple bandwidth/FLOPS plot for your GPU
+  - [ ] Refine into a real roofline plot after Sunday's roofline paper
+  - [ ] Revisit after Week 6/7 to add cuBLAS and Nsight Compute
 
 ### 📄 Sunday Paper
 - [ ] Read: "Roofline: An Insightful Visual Performance Model" (Williams et al., 2009)
@@ -1067,7 +1086,8 @@ Every monthly project README should include:
 - [ ] **CUDA Reduction Library + MNIST Classifier**
   - [ ] Complete parallel reduction library (sum, min, max, argmax)
   - [ ] MLP on MNIST achieving >97% accuracy
-  - [ ] Profile training loop end-to-end with Nsight Systems
+  - [ ] Time the training loop with PyTorch profiler/CUDA events
+  - [ ] Revisit after Week 7 to profile end-to-end with Nsight Systems
 
 ### 📄 Sunday Paper
 - [ ] Read: "Efficient Estimation of Word Representations in Vector Space" (Mikolov, 2013) — Word2Vec
@@ -1117,7 +1137,8 @@ Every monthly project README should include:
 - [ ] **Character-Level Language Model**
   - [ ] Train character-level LSTM on Shakespeare text
   - [ ] Generate text at different temperatures
-  - [ ] Profile training with Nsight Systems
+  - [ ] Track training speed, memory use, and loss curves
+  - [ ] Revisit after Week 7 to profile training with Nsight Systems
 
 ### 📄 Sunday Paper
 - [ ] Read: "Neural Machine Translation by Jointly Learning to Align and Translate" (Bahdanau, 2014)
@@ -1227,9 +1248,10 @@ Every monthly project README should include:
 ### 🔨 Saturday Project
 - [ ] **GPT-2 Small from Scratch**
   - [ ] Full 124M parameter model implementation
-  - [ ] AMP training, gradient checkpointing
+  - [ ] Clean FP32 training loop with checkpoint save/resume
   - [ ] KV-cache inference
   - [ ] Benchmark tokens/second
+  - [ ] Revisit after Week 8 to add AMP and gradient checkpointing
 
 ### 📄 Sunday Papers
 - [ ] "Language Models are Unsupervised Multitask Learners" (GPT-2, Radford 2019)
@@ -1256,6 +1278,7 @@ Every monthly project README should include:
 - [ ] RMSNorm: `x / sqrt(mean(x²) + eps) * gamma`
 - [ ] SwiGLU activation: `(xW₁ ⊙ Swish(xV)) W₂`
 - [ ] Grouped Query Attention (GQA): share KV heads → smaller KV-cache
+- [ ] Basic interpretability: residual stream, logit lens, attention heatmaps
 - [ ] **Code:** Implement LLaMA model architecture from scratch
 
 ### Day 4 — Scaling Laws & MoE Overview
@@ -1272,7 +1295,7 @@ Every monthly project README should include:
 - [ ] Kernel fusion: reduce memory traffic
 - [ ] `torch.compile` (TorchDynamo + TorchInductor): automatic kernel fusion
 - [ ] Triton: Python GPU kernel language used by PyTorch
-- [ ] **Code:** Compare `torch.compile` vs eager mode, profile both
+- [ ] **Code:** Compare `torch.compile` vs eager mode, profile both; add simple logit-lens probes to your small model
 
 ### 🔨 Saturday Project
 - [ ] **LLaMA-Style Model with All Modern Features**
@@ -1565,7 +1588,7 @@ Every monthly project README should include:
 
 # ═══════════════════════════════════════════════════
 # PHASE 2: INTERMEDIATE (Weeks 13-26, Months 4-6)
-# PEFT, Quantization, Inference, RAG, Agents
+# PEFT, Quantization, Inference, RAG, Agents, Reasoning
 # ═══════════════════════════════════════════════════
 
 ---
@@ -2146,7 +2169,7 @@ Every monthly project README should include:
 - [ ] Revise reasoning: CoT, ToT, self-consistency, STaR
 - [ ] Revise long context: RoPE scaling, Flash Attention, Mamba/SSM
 - [ ] Revise distillation, model merging, synthetic data
-- [ ] **Build Monthly Project A:** AgentForge — Multi-Agent Platform
+- [ ] **Build Monthly Project A:** AgentForge — Reasoning Agent Platform
 - [ ] **Build Monthly Project B:** EvalArena — Model/Cost/Safety Battleground
 - [ ] Push both projects to GitHub
 - [ ] **Write a "6-month retrospective" blog post summarizing your journey**
