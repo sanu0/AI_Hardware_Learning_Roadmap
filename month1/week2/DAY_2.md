@@ -765,6 +765,14 @@ No conflict.
 
 This tiny extra column is one of the most famous CUDA tricks.
 
+Important clarification:
+
+This solution is for **row-major shared-memory storage with column-wise access**.
+CUDA/C/C++ 2D arrays are row-major, so `tile[32][32]` is stored row by row. Padding
+is not needed simply because CUDA is row-major. Padding becomes useful when a warp
+accesses that row-major tile in a column-wise or transposed pattern, such as
+`tile[threadIdx.x][threadIdx.y]`.
+
 Padding feels silly until you understand the modulo. You are not adding the extra
 column because you need more data. You add it to change the address arithmetic.
 By making the row stride 33, every new row starts one bank later than the previous
