@@ -40,6 +40,14 @@ Imagine 256 threads in a CUDA block doing a stencil operation:
 out[i] = in[i-1] + in[i] + in[i+1];
 ```
 
+What this snippet is doing:
+
+- One output value is computed from three input values.
+- `in[i]` is the center element.
+- `in[i-1]` and `in[i+1]` are the left and right neighbors.
+- This is a stencil pattern, and it naturally creates data reuse because neighboring
+  threads need overlapping input values.
+
 Thread 10 needs:
 
 ```text
@@ -263,11 +271,27 @@ __global__ void kernel(...) {
 }
 ```
 
+What this snippet is doing:
+
+- `__global__` means this function is a CUDA kernel launched from the CPU and run on the GPU.
+- `__shared__ float tile[256];` allocates 256 `float` values in shared memory for **each block**.
+- Because one `float` is 4 bytes, this block uses `256 * 4 = 1024 bytes`, or 1 KB, of shared memory.
+- Every thread inside the same block can read and write this `tile`.
+- A different block gets a different private `tile`; blocks do not share this allocation.
+- The actual per-block limit depends on the GPU. You can check it with `cudaGetDeviceProperties()` using `prop.sharedMemPerBlock`.
+
 Use static shared memory when the size is fixed:
 
 ```c
 __shared__ float tile[32][32];
 ```
+
+What this snippet is doing:
+
+- This creates a 2D shared-memory tile with 32 rows and 32 columns.
+- It stores `32 * 32 = 1024` floats.
+- At 4 bytes per float, this is `1024 * 4 = 4096 bytes`, or 4 KB, of shared memory per block.
+- This shape is common because 32 connects naturally to CUDA's warp size.
 
 This is simple and readable.
 
@@ -287,12 +311,26 @@ __global__ void kernel(...) {
 }
 ```
 
+What this snippet is doing:
+
+- `extern __shared__` declares dynamic shared memory.
+- The array has no fixed size in the source code.
+- CUDA allocates the size you provide when launching the kernel.
+- Inside the kernel, `tile[]` behaves like a shared array owned by the current block.
+
 Launch syntax:
 
 ```c
 int shared_bytes = blockDim.x * sizeof(float);
 kernel<<<blocks, threads, shared_bytes>>>(...);
 ```
+
+What this snippet is doing:
+
+- `shared_bytes` computes how many bytes of dynamic shared memory each block needs.
+- `blockDim.x * sizeof(float)` means one `float` slot per thread.
+- The third launch parameter, `shared_bytes`, is the dynamic shared-memory allocation per block.
+- If `threads = 256`, then `shared_bytes = 256 * 4 = 1024 bytes`.
 
 Use dynamic shared memory when tile size depends on runtime choices:
 
@@ -316,6 +354,14 @@ float *tile_A = smem;
 float *tile_B = smem + TILE_SIZE;
 ```
 
+What this snippet is doing:
+
+- `smem` is one raw shared-memory buffer.
+- `tile_A` starts at the beginning of that buffer.
+- `tile_B` starts after `TILE_SIZE` floats.
+- This is how one dynamic shared-memory allocation can be manually split into multiple logical arrays.
+- You must allocate enough bytes at launch for both regions, otherwise the arrays overlap or go out of bounds.
+
 That is powerful, but it is also where indexing mistakes hide.
 
 ## 3.3 The Most Important Shared Memory Rule: Synchronize
@@ -329,6 +375,13 @@ shared[threadIdx.x] = global[i];
 float x = shared[threadIdx.x + 1];  // maybe neighbor has not written yet!
 ```
 
+What this snippet is trying to do:
+
+- Each thread copies one value from `global[i]` into `shared[threadIdx.x]`.
+- Then each thread immediately tries to read its neighbor from shared memory.
+- The problem is timing: the neighbor thread may not have written its value yet.
+- So this code can read old, missing, or undefined data.
+
 Good:
 
 ```c
@@ -336,6 +389,13 @@ shared[threadIdx.x] = global[i];
 __syncthreads();
 float x = shared[threadIdx.x + 1];
 ```
+
+What this snippet is doing correctly:
+
+- First, each thread writes its global value into the block-local shared tile.
+- `__syncthreads()` waits until every thread in the block reaches the barrier.
+- After the barrier, it is safe for a thread to read shared values written by other threads.
+- This is the normal shared-memory rhythm: load together, synchronize, then reuse together.
 
 `__syncthreads()` is a **block-wide barrier**:
 
@@ -372,6 +432,13 @@ if (threadIdx.x < 128) {
     __syncthreads();  // BAD if other threads skip it
 }
 ```
+
+What this snippet is warning you about:
+
+- Only threads with `threadIdx.x < 128` enter the `if`.
+- Threads with `threadIdx.x >= 128` skip the barrier.
+- The first group waits forever for the second group to arrive.
+- That can deadlock the whole block.
 
 The barrier is not just "wait a bit." It is a correctness contract. If 255 threads
 arrive and one thread never arrives, the 255 wait forever. This is why CUDA kernels
@@ -454,6 +521,14 @@ int tx = threadIdx.x;     // 0..31 in one warp
 float x = shared[tx];
 ```
 
+What this snippet is doing:
+
+- `tx` is the thread's lane-like index inside the block.
+- Each thread reads the shared-memory element with the same index as its thread index.
+- Thread 0 reads `shared[0]`, thread 1 reads `shared[1]`, and so on.
+- For FP32 values, consecutive indices map to consecutive shared-memory banks.
+- This is the clean, no-conflict pattern.
+
 ```
 Thread:   T0  T1  T2  T3              T30 T31
 Index:     0   1   2   3      ...      30  31
@@ -473,6 +548,14 @@ land in different banks so the SRAM lanes work in parallel.
 int tx = threadIdx.x;     // 0..31
 float x = shared[tx * 32];
 ```
+
+What this snippet is doing:
+
+- Each thread reads an index separated by 32 floats.
+- Thread 0 reads `shared[0]`, thread 1 reads `shared[32]`, thread 2 reads `shared[64]`.
+- With the simple FP32 rule, all those indices map back to the same bank.
+- The addresses are different, so the hardware cannot use the broadcast exception.
+- This creates a bank conflict.
 
 ```
 Thread:   T0   T1   T2   T3          T31
@@ -519,11 +602,24 @@ The classic example is a 32×32 tile:
 __shared__ float tile[32][32];
 ```
 
+What this snippet is doing:
+
+- It declares a 32-by-32 shared-memory tile per block.
+- The tile contains `32 * 32 = 1024` floats.
+- In C/C++, this 2D array is stored row-major: row 0 first, then row 1, then row 2.
+- That row-major layout is why row-wise and column-wise access behave differently.
+
 C stores this in row-major order:
 
 ```text
 tile[row][col] address index = row * 32 + col
 ```
+
+What this formula means:
+
+- `row * 32` jumps to the beginning of the selected row.
+- `+ col` moves to the selected column inside that row.
+- Because the row width is exactly 32, moving down one row moves by exactly 32 floats.
 
 Row-wise access:
 
@@ -531,12 +627,25 @@ Row-wise access:
 tile[threadIdx.y][threadIdx.x]
 ```
 
+What this snippet is doing:
+
+- `threadIdx.y` chooses the row.
+- `threadIdx.x` chooses the column.
+- For one warp in this example, the row is fixed and the column changes from 0 to 31.
+- So the warp reads consecutive elements in one row, which maps nicely across banks.
+
 For one warp, `threadIdx.y` is fixed and `threadIdx.x = 0..31`.
 
 ```text
 index = row * 32 + tx
 bank  = (row * 32 + tx) % 32 = tx
 ```
+
+What this formula means:
+
+- `row * 32` is divisible by 32, so it disappears under `% 32`.
+- The bank becomes `tx`.
+- Since each thread has a different `tx`, each thread hits a different bank.
 
 Every thread uses a different bank. Good.
 
@@ -546,12 +655,25 @@ Column-wise access:
 tile[threadIdx.x][threadIdx.y]
 ```
 
+What this snippet is doing:
+
+- Now `threadIdx.x` chooses the row.
+- `threadIdx.y` chooses the column.
+- For one warp, neighboring lanes move down different rows instead of across one row.
+- Since each row is 32 floats wide, each lane jumps by 32 floats.
+
 For one warp, `threadIdx.y` is fixed and `threadIdx.x = 0..31`.
 
 ```text
 index = tx * 32 + col
 bank  = (tx * 32 + col) % 32 = col
 ```
+
+What this formula means:
+
+- `tx * 32` is always divisible by 32.
+- After `% 32`, only `col` remains.
+- If `col` is fixed, every thread maps to the same bank.
 
 Every thread uses the same bank. Bad.
 
@@ -582,12 +704,25 @@ The fix is beautifully simple:
 __shared__ float tile[32][33];
 ```
 
+What this snippet is doing:
+
+- It declares 32 rows, but each row has 33 floats instead of 32.
+- The extra column is padding.
+- We do not add it because the math needs more values.
+- We add it to change the shared-memory bank mapping.
+
 Now the row stride is 33, not 32.
 
 ```text
 tile[row][col] index = row * 33 + col
 bank = (row * 33 + col) % 32
 ```
+
+What this formula means:
+
+- Moving down one row now moves by 33 floats.
+- Since `33 % 32 = 1`, every new row starts one bank later than the previous row.
+- This tiny shift breaks the "all lanes hit the same bank" pattern.
 
 Column-wise access:
 
@@ -596,6 +731,12 @@ index = tx * 33 + col
 bank  = (tx * 33 + col) % 32
       = (tx + col) % 32
 ```
+
+What this formula means:
+
+- Under modulo 32, multiplying by 33 behaves like multiplying by 1.
+- So the bank changes with `tx`.
+- Consecutive threads now land on consecutive banks again.
 
 Now thread 0, 1, 2, 3... land in different banks again.
 
@@ -653,17 +794,37 @@ Declare it like this:
 __constant__ float c_filter[64];
 ```
 
+What this snippet is doing:
+
+- `__constant__` places `c_filter` in GPU constant memory.
+- `c_filter[64]` stores 64 read-only `float` values on the device.
+- Kernels can read this array, but they cannot write to it.
+- The CPU/host fills it before launching the kernel.
+
 Copy data into it from the host:
 
 ```c
 cudaMemcpyToSymbol(c_filter, h_filter, 64 * sizeof(float));
 ```
 
+What this snippet is doing:
+
+- `h_filter` is the CPU-side array.
+- `c_filter` is the GPU constant-memory symbol.
+- `cudaMemcpyToSymbol` copies bytes from the host array into the device constant-memory variable.
+- `64 * sizeof(float)` says exactly how many bytes to copy.
+
 Then kernels read it:
 
 ```c
 float w = c_filter[k];
 ```
+
+What this snippet is doing:
+
+- A thread reads the `k`th constant value.
+- If every thread in a warp reads the same `k`, constant memory can broadcast that value efficiently.
+- If every thread reads a different `k`, the special constant-memory advantage becomes weaker.
 
 Constant memory is controlled from the host side. Kernels cannot write to
 `__constant__` variables. You update them before launching the kernel, and every
@@ -677,6 +838,12 @@ If every thread in a warp reads the same constant address:
 ```c
 float scale = c_params[0];
 ```
+
+What this snippet is doing:
+
+- Every thread reads the same scalar value from constant memory.
+- If the whole warp reads `c_params[0]`, the hardware can serve that as a broadcast.
+- This is the ideal constant-memory access pattern.
 
 Then the hardware broadcasts it:
 
@@ -709,6 +876,13 @@ If each thread reads a different constant address:
 ```c
 float x = c_table[threadIdx.x];
 ```
+
+What this snippet is doing:
+
+- Each thread uses its own thread index to choose a different constant-memory address.
+- Thread 0 reads `c_table[0]`, thread 1 reads `c_table[1]`, and so on.
+- That is no longer one shared value for the whole warp.
+- Constant memory may serialize or lose its broadcast benefit here.
 
 Then the warp no longer gets one broadcast. Accesses may serialize.
 
@@ -789,6 +963,13 @@ __global__ void too_many_private_values(float *out) {
 }
 ```
 
+What this snippet is doing:
+
+- Every thread creates its own private `tmp[128]` array.
+- This is not shared between threads.
+- Because the array is large for a per-thread private object, the compiler may place it in local memory instead of registers.
+- If that happens, the private array may be backed by global memory, making it much slower than it looks.
+
 This array may live in local memory, not registers.
 
 That means every thread is secretly reading/writing global memory for its private
@@ -800,11 +981,24 @@ You can inspect this with:
 nvcc -Xptxas -v my_kernel.cu -o my_kernel
 ```
 
+What this command is doing:
+
+- `nvcc` compiles the CUDA file.
+- `-Xptxas -v` asks the lower-level PTX assembler to print resource usage.
+- The output tells you how many registers the kernel used and whether any values spilled to local memory.
+
 Look for output like:
 
 ```text
 ptxas info    : Used 64 registers, 384 bytes spill stores, 384 bytes spill loads
 ```
+
+What this output means:
+
+- `Used 64 registers` means each thread uses 64 registers.
+- `spill stores` means some register values had to be written out to local memory.
+- `spill loads` means those spilled values had to be read back later.
+- Spills are a warning sign that private thread state became too large for registers.
 
 If you see spills, your kernel may be slower than expected.
 
@@ -851,6 +1045,12 @@ This example computes:
 ```c
 out[i] = in[i-1] + in[i] + in[i+1]
 ```
+
+What this snippet is doing:
+
+- It computes one output element from a center value and its two neighbors.
+- This is the exact operation the exercise implements twice: once with global
+  memory only, and once with a shared-memory tile.
 
 We compare two versions:
 
@@ -1024,11 +1224,163 @@ int main() {
 }
 ```
 
+### Code Walkthrough: Shared Stencil
+
+Read this program in layers.
+
+```text
+%%writefile shared_stencil.cu
+```
+
+This is a Colab/Jupyter command. It writes the following code into a file named
+`shared_stencil.cu` so `nvcc` can compile it.
+
+```text
+#include <stdio.h>
+#include <stdlib.h>
+```
+
+These headers provide `printf()` and `exit()`.
+
+```text
+#define CUDA_CHECK(call) ...
+```
+
+This macro wraps CUDA API calls. If a CUDA call fails, it prints the file name,
+line number, and CUDA error string, then exits. This keeps errors visible instead
+of letting the program silently continue.
+
+```text
+__global__ void stencil_global(...)
+```
+
+This is the naive kernel. Each GPU thread computes one output element.
+
+```text
+int i = blockIdx.x * blockDim.x + threadIdx.x;
+```
+
+This converts block/thread coordinates into the global array index. For example,
+if `blockDim.x = 256`, block 0 covers indices 0-255, block 1 covers 256-511.
+
+```text
+if (i > 0 && i < N - 1)
+```
+
+This avoids the boundary elements because `out[0]` would need `in[-1]`, and
+`out[N-1]` would need `in[N]`.
+
+```text
+out[i] = in[i - 1] + in[i] + in[i + 1];
+```
+
+This is the stencil. The thread reads the left neighbor, center value, and right
+neighbor directly from global memory.
+
+```text
+__global__ void stencil_shared(...)
+```
+
+This is the shared-memory version. It still computes one output per thread, but
+the block first stages input values into a shared tile.
+
+```text
+extern __shared__ float tile[];
+```
+
+This creates a dynamic shared-memory array. Its size is decided at launch by the
+third kernel launch parameter.
+
+```text
+int tx = threadIdx.x;
+int i  = blockIdx.x * blockDim.x + tx;
+```
+
+`tx` is the thread's local index inside the block. `i` is the matching global
+index in the full input array.
+
+```text
+tile[tx + 1] = in[i];
+```
+
+Each thread copies its own global value into shared memory. The `+1` shift leaves
+`tile[0]` open for the left halo.
+
+```text
+if (tx == 0) { ... tile[0] = ...; }
+```
+
+Only the first thread in the block loads the left halo value. This is the value
+just before the block's first normal element.
+
+```text
+if (tx == blockDim.x - 1) { ... tile[tx + 2] = ...; }
+```
+
+Only the last thread in the block loads the right halo value. This is the value
+just after the block's last normal element.
+
+```text
+__syncthreads();
+```
+
+This is essential. It guarantees the center values and halo values are all loaded
+before any thread reads from `tile`.
+
+```text
+out[i] = tile[tx] + tile[tx + 1] + tile[tx + 2];
+```
+
+Now the thread computes the stencil from shared memory. `tile[tx]` is left,
+`tile[tx + 1]` is center, and `tile[tx + 2]` is right.
+
+```text
+benchmark_global(...)
+benchmark_shared(...)
+```
+
+These functions time the two kernels. They do one warm-up launch first, then time
+many repeated launches using CUDA events.
+
+```text
+int shared_bytes = (threads + 2) * sizeof(float);
+```
+
+The shared kernel needs one slot per thread plus two halo slots. With 256 threads,
+that is 258 floats.
+
+```text
+stencil_shared<<<blocks, threads, shared_bytes>>>(...)
+```
+
+The third launch argument gives each block that many bytes of dynamic shared
+memory.
+
+```text
+float useful_gb = (float)N * 4.0f * sizeof(float) / 1e9f;
+```
+
+For each output element, the stencil conceptually uses 3 reads and 1 write, so
+the program reports useful work as 4 floats per element.
+
+```text
+printf(...)
+```
+
+The print block shows timing and useful bandwidth so you can compare global-only
+access versus shared-memory reuse.
+
 Run:
 
 ```python
 !nvcc shared_stencil.cu -o shared_stencil && ./shared_stencil
 ```
+
+What this command is doing:
+
+- `nvcc shared_stencil.cu -o shared_stencil` compiles the CUDA program.
+- `./shared_stencil` runs the compiled executable.
+- In Colab, the `!` means "run this as a shell command."
 
 ### How To Read The Result
 
@@ -1066,11 +1418,22 @@ We compare:
 __shared__ float tile[32][32];  // conflict when read column-wise
 ```
 
+What this snippet is doing:
+
+- It creates a 32-by-32 shared tile with row stride 32.
+- Column-wise reads from this layout can make every lane in a warp hit the same bank.
+
 versus:
 
 ```c
 __shared__ float tile[32][33];  // padded, no conflict
 ```
+
+What this snippet is doing:
+
+- It creates the same logical 32-row tile, but with one extra padding column.
+- The row stride becomes 33, which shifts each row by one bank.
+- That breaks the column-wise bank conflict.
 
 ```c
 %%writefile bank_conflict_demo.cu
@@ -1200,11 +1563,133 @@ int main() {
 }
 ```
 
+### Code Walkthrough: Bank Conflict Demo
+
+```text
+%%writefile bank_conflict_demo.cu
+```
+
+This writes the program into `bank_conflict_demo.cu` in a notebook environment.
+
+```text
+#define TILE 32
+```
+
+The tile width is 32 so it matches the warp size and makes the bank-conflict
+pattern easy to see.
+
+```text
+__global__ void conflict_kernel(float *out, int iters)
+```
+
+This kernel intentionally creates a shared-memory bank conflict.
+
+```text
+__shared__ volatile float tile[TILE][TILE];
+```
+
+This allocates a 32-by-32 shared tile. The row stride is 32. `volatile` discourages
+the compiler from optimizing away the repeated shared-memory reads, because this
+demo wants to measure the access pattern.
+
+```text
+int tx = threadIdx.x;
+int ty = threadIdx.y;
+int tid = ty * blockDim.x + tx;
+```
+
+`tx` and `ty` are the thread's 2D coordinates inside the block. `tid` flattens
+that 2D coordinate into a single output index.
+
+```text
+tile[ty][tx] = (float)(tid);
+```
+
+Each thread writes one value into the shared tile. This write is row-wise, so it
+is bank-friendly.
+
+```text
+__syncthreads();
+```
+
+The block waits until the full tile has been written.
+
+```text
+sum += tile[tx][ty];
+```
+
+This reads the tile with row and column swapped. For a 32-by-32 tile, this
+column-wise pattern maps many lanes to the same bank. That is the intentional
+conflict.
+
+```text
+out[tid] = sum;
+```
+
+The final sum is written to global memory so the compiler has to keep the loop's
+work.
+
+```text
+__global__ void padded_kernel(float *out, int iters)
+```
+
+This kernel does the same logical work, but with a padded shared-memory layout.
+
+```text
+__shared__ volatile float tile[TILE][TILE + 1];
+```
+
+The tile has 33 columns. The extra column changes the row stride from 32 to 33,
+which spreads column-wise reads across banks.
+
+```text
+sum += tile[tx][ty];
+```
+
+This line is intentionally the same as in the conflict kernel. The only difference
+is the memory layout, which proves the padding is what changes performance.
+
+```text
+time_conflict(...)
+time_padded(...)
+```
+
+These timing functions launch each kernel once as a warm-up, then repeatedly launch
+it under CUDA events.
+
+```text
+dim3 block(TILE, TILE);
+```
+
+This creates a 32-by-32 thread block, which is 1024 threads. That is the maximum
+common CUDA block size.
+
+```text
+int iters = 2000;
+int repeats = 200;
+```
+
+`iters` repeats the shared-memory read inside each kernel to amplify the bank
+conflict. `repeats` launches the whole kernel many times to get a stable average.
+
+```text
+ms_conflict / ms_padded
+```
+
+This prints how many times slower the conflicting layout is compared with the
+padded layout.
+
 Run:
 
 ```python
 !nvcc bank_conflict_demo.cu -o bank_conflict_demo && ./bank_conflict_demo
 ```
+
+What this command is doing:
+
+- `nvcc` compiles the CUDA source file.
+- `-o bank_conflict_demo` names the executable.
+- `./bank_conflict_demo` runs it and prints the timing comparison.
 
 ### What You Should See
 
@@ -1344,11 +1829,113 @@ int main() {
 }
 ```
 
+### Code Walkthrough: Constant Memory Demo
+
+```text
+%%writefile constant_memory_demo.cu
+```
+
+This writes the full demo program into a CUDA source file.
+
+```text
+__constant__ float c_table[256];
+```
+
+This creates a 256-float table in device constant memory. Kernels can read it.
+The host fills it before the kernels run.
+
+```text
+__global__ void constant_broadcast(float *out, int N, int iters)
+```
+
+This kernel tests the good constant-memory pattern: warp-uniform reads.
+
+```text
+int i = blockIdx.x * blockDim.x + threadIdx.x;
+if (i >= N) return;
+```
+
+Each thread gets a global output index. Threads outside the valid range exit.
+
+```text
+sum += c_table[k & 255];
+```
+
+For a fixed loop value `k`, every thread in the warp reads the same constant
+address. `k & 255` keeps the index between 0 and 255. This is broadcast-friendly.
+
+```text
+out[i] = sum;
+```
+
+Each thread writes its final sum so the work is observable.
+
+```text
+__global__ void constant_divergent(float *out, int N, int iters)
+```
+
+This kernel tests the weaker pattern: different lanes read different constant
+addresses.
+
+```text
+int lane = threadIdx.x & 31;
+```
+
+This computes the thread's lane index inside a warp, from 0 to 31.
+
+```text
+sum += c_table[(lane + k) & 255];
+```
+
+Now each lane reads a different table entry for the same loop iteration. That
+breaks the clean broadcast pattern.
+
+```text
+time_broadcast(...)
+time_divergent(...)
+```
+
+These functions time each kernel using CUDA events. Each one launches a warm-up
+kernel before measuring repeated launches.
+
+```text
+float h_table[256];
+for (int i = 0; i < 256; i++) h_table[i] = 1.0f + i;
+```
+
+This creates and initializes the CPU-side version of the constant table.
+
+```text
+cudaMemcpyToSymbol(c_table, h_table, sizeof(h_table));
+```
+
+This copies the CPU table into the GPU's constant-memory symbol `c_table`.
+
+```text
+int N = 8 * 1024 * 1024;
+int iters = 100;
+```
+
+The program uses many output elements and repeated table reads so the timing
+difference is visible.
+
+```text
+printf(...)
+```
+
+The print section compares the broadcast-friendly access pattern with the divergent
+access pattern.
+
 Run:
 
 ```python
 !nvcc constant_memory_demo.cu -o constant_memory_demo && ./constant_memory_demo
 ```
+
+What this command is doing:
+
+- It compiles the constant-memory demo with `nvcc`.
+- Then it runs the executable and prints the timing table.
 
 ### What This Proves
 
@@ -1410,6 +1997,14 @@ Naive transpose:
 ```c
 B[col][row] = A[row][col];
 ```
+
+What this snippet is doing:
+
+- It reads one value from row `row`, column `col` in matrix `A`.
+- It writes that value to row `col`, column `row` in matrix `B`.
+- That swap of row and column is the definition of transpose.
+- The difficulty is not the math; the difficulty is making the GPU reads and
+  writes memory-friendly.
 
 Reads are row-wise, good.
 Writes become column-wise, bad.
@@ -1597,11 +2192,156 @@ int main() {
 }
 ```
 
+### Code Walkthrough: Tiled Transpose
+
+```text
+%%writefile transpose_project.cu
+```
+
+This writes the project code into `transpose_project.cu`.
+
+```text
+#define TILE 32
+```
+
+The matrix is processed in 32-by-32 tiles. This shape makes the connection to
+warps and bank conflicts easy to see.
+
+```text
+__global__ void transpose_naive(...)
+```
+
+This is the direct transpose kernel. It does not use shared memory.
+
+```text
+int x = blockIdx.x * TILE + threadIdx.x;
+int y = blockIdx.y * TILE + threadIdx.y;
+```
+
+These lines compute the input matrix coordinate handled by the current thread.
+`x` is the column and `y` is the row.
+
+```text
+out[x * height + y] = in[y * width + x];
+```
+
+This writes the transposed value. The input index is row-major for the original
+matrix. The output index swaps row and column. The problem is that either reads or
+writes become poorly coalesced.
+
+```text
+__global__ void transpose_shared_conflict(...)
+```
+
+This version uses shared memory to make global memory access nicer, but it still
+has shared-memory bank conflicts.
+
+```text
+__shared__ float tile[TILE][TILE];
+```
+
+This allocates a 32-by-32 shared tile. The row stride is exactly 32, so transposed
+shared-memory reads can conflict.
+
+```text
+tile[threadIdx.y][threadIdx.x] = in[y * width + x];
+```
+
+Each thread loads one value from global memory into shared memory. This load is
+row-wise and coalesced when neighboring threads read neighboring `x` values.
+
+```text
+__syncthreads();
+```
+
+The block waits until the full tile is loaded before reading it transposed.
+
+```text
+int out_x = blockIdx.y * TILE + threadIdx.x;
+int out_y = blockIdx.x * TILE + threadIdx.y;
+```
+
+The output block coordinates are swapped. This is how the tile moves to its
+transposed position in the output matrix.
+
+```text
+out[out_y * height + out_x] = tile[threadIdx.x][threadIdx.y];
+```
+
+The thread reads the shared tile transposed and writes to global memory. The
+global write is now coalesced, but the shared-memory read can have bank conflicts
+because the tile has a 32-float row stride.
+
+```text
+__global__ void transpose_shared_padded(...)
+```
+
+This is the improved shared-memory transpose.
+
+```text
+__shared__ float tile[TILE][TILE + 1];
+```
+
+The tile has one extra column. The logical tile is still 32-by-32, but the memory
+stride is 33. This avoids the column-wise shared-memory bank conflict.
+
+```text
+tile[threadIdx.y][threadIdx.x] = in[y * width + x];
+out[out_y * height + out_x] = tile[threadIdx.x][threadIdx.y];
+```
+
+These are the same logical load and transposed read as before. The key difference
+is the padded layout, not the transpose math.
+
+```text
+time_naive(...)
+time_shared_conflict(...)
+time_shared_padded(...)
+```
+
+These functions measure the three versions with CUDA events. Each function warms
+up once, then averages 100 launches.
+
+```text
+dim3 block(TILE, TILE);
+dim3 grid((width + TILE - 1) / TILE, (height + TILE - 1) / TILE);
+```
+
+`block` creates one 32-by-32 thread block per tile. `grid` computes how many tiles
+are needed to cover the full matrix, including edge cases where dimensions are not
+perfect multiples of 32.
+
+```text
+int width = 4096;
+int height = 4096;
+```
+
+The test matrix is large enough that memory access patterns matter.
+
+```text
+float moved_gb = 2.0f * bytes / 1e9f;
+```
+
+A transpose reads the matrix once and writes the matrix once, so total data moved
+is approximately `2 * bytes`.
+
+```text
+moved_gb / (ms / 1000.0f)
+```
+
+This converts the measured time into effective GB/s.
+
 Run:
 
 ```python
 !nvcc transpose_project.cu -o transpose_project && ./transpose_project
 ```
+
+What this command is doing:
+
+- It compiles the transpose project.
+- Then it runs the executable and prints timing plus effective bandwidth for all
+  three kernels.
 
 ## What To Look For
 
@@ -1855,6 +2595,13 @@ tile[threadIdx.x] = global[i];
 float neighbor = tile[threadIdx.x + 1];  // neighbor may not be loaded yet
 ```
 
+Code meaning:
+
+- The first line copies one global-memory value into shared memory.
+- The second line immediately reads a neighboring shared-memory slot.
+- It is unsafe because that neighboring slot may be written by another thread that
+  has not reached its store yet.
+
 That read can happen before the neighboring thread writes its value. The result is
 a race condition.
 
@@ -1873,6 +2620,12 @@ tile[threadIdx.x] = global[i];
 __syncthreads();
 // now it is safe to read tile values written by other threads
 ```
+
+Code meaning:
+
+- First, each thread writes its own shared-memory slot.
+- Then the whole block waits at `__syncthreads()`.
+- After the barrier, all earlier shared-memory writes are visible to the block.
 
 The barrier must be reached by every thread in the block. If only some threads
 execute it, the block can deadlock.
@@ -1919,6 +2672,14 @@ Conflict example:
 float x = shared[threadIdx.x * 32];
 ```
 
+Code meaning:
+
+- Thread 0 reads index 0.
+- Thread 1 reads index 32.
+- Thread 2 reads index 64.
+- Those are different addresses, but they map to the same bank in the simple FP32
+  model.
+
 For a warp:
 
 ```text
@@ -1948,6 +2709,12 @@ A 2D shared tile:
 __shared__ float tile[32][32];
 ```
 
+Code meaning:
+
+- This allocates a 32-by-32 shared-memory tile per block.
+- The row stride is 32 floats.
+- That stride is exactly what creates the classic column-wise bank conflict.
+
 is stored row-major. The address index is:
 
 ```text
@@ -1959,6 +2726,12 @@ For column-wise access:
 ```c
 tile[threadIdx.x][constant_col]
 ```
+
+Code meaning:
+
+- `threadIdx.x` chooses the row.
+- `constant_col` keeps the column fixed.
+- Neighboring lanes therefore walk down rows in the same column.
 
 the bank is:
 
@@ -1974,6 +2747,12 @@ With padding:
 ```c
 __shared__ float tile[32][33];
 ```
+
+Code meaning:
+
+- This allocates a padded shared-memory tile.
+- The logical tile still behaves like 32 useful columns.
+- The extra column changes the row stride to 33, improving the bank mapping.
 
 the address index becomes:
 
@@ -2003,6 +2782,11 @@ Good pattern:
 float scale = c_params[0];  // every lane reads c_params[0]
 ```
 
+Code meaning:
+
+- Every lane reads the same constant-memory address.
+- That is the pattern constant memory is built to broadcast efficiently.
+
 This is useful for:
 
 - small filter coefficients
@@ -2015,6 +2799,12 @@ Bad or less useful pattern:
 ```c
 float x = c_table[threadIdx.x];  // each lane reads a different address
 ```
+
+Code meaning:
+
+- Each lane reads a different constant-memory address.
+- This breaks the ideal broadcast pattern.
+- It may still work correctly, but it is usually less efficient.
 
 Now the warp does not get one clean broadcast. Accesses may serialize or lose the
 constant-cache advantage.
@@ -2046,6 +2836,12 @@ Example:
 float tmp[128];  // private per-thread array
 ```
 
+Code meaning:
+
+- Every thread gets its own private 128-float temporary array.
+- Because it is private, it is not shared memory.
+- Because it is large, the compiler may store it in local memory instead of registers.
+
 This may become local memory. Every thread has its own `tmp`, but those values may
 be stored in global memory. That makes accesses much slower than registers.
 
@@ -2060,6 +2856,12 @@ Compile with:
 ```bash
 nvcc -Xptxas -v my_kernel.cu -o my_kernel
 ```
+
+Command meaning:
+
+- Compile the CUDA program.
+- Ask `ptxas` to print kernel resource usage.
+- Use the output to check register count and spills.
 
 Look for lines like:
 
