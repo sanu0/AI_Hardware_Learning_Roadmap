@@ -1806,63 +1806,15 @@ Each week's Saturday morning (or Friday evening — your choice) you spend **1.5
 - [ ] `nn.Embedding`: lookup table, gradient computation
 - [ ] **Code:** Parallel histogram (naive vs privatized) + train word embeddings on small corpus
 
-### 🔧 Day 6 — Silicon: Digital Logic Foundations + First Verilog (START OF SILICON TRACK)
-> **Connection to LLM track:** You spent 5 days on how warps execute reductions and atomics across thousands of cores. Today you zoom into the *gates* those cores are built from. After today, when you write `atomicAdd`, you'll picture the chain of NAND gates underneath.
-
-**Numbers (silicon perspective):**
-- [ ] **Two's complement deep dive** — sign bit semantics, range = `[-2^(N-1), 2^(N-1)-1]`, negation = `~x + 1`, why subtraction = addition with negated operand
-- [ ] **Hex shorthand** — every 4 bits = 1 hex digit; learn the table cold (0=0000, F=1111)
-- [ ] **Sign extension** — extending an 8-bit signed value to 16-bit means copying the sign bit into the upper 8 bits
-
-**Boolean algebra:**
-- [ ] Truth tables for **AND, OR, NOT, XOR, NAND, NOR** — memorize them
-- [ ] **DeMorgan's laws**: `!(A · B) = !A + !B` and `!(A + B) = !A · !B` (you'll use this every day)
-- [ ] **NAND/NOR are universal** — any circuit can be built using only NAND (or only NOR). This is why CMOS uses them everywhere
-- [ ] Identities: `A + 0 = A`, `A · 1 = A`, `A + !A = 1`, `A · !A = 0`, `A + A·B = A` (absorption)
-
-**Logic gates as physical circuits:**
-- [ ] CMOS gate construction: pull-up network (pMOS) + pull-down network (nMOS), output is "0" when pull-down conducts, "1" when pull-up conducts
-- [ ] Transistor count per gate: NOT=2, NAND=4, NOR=4, AND=6, OR=6, XOR=8 — *NAND is cheaper than AND in silicon*. This is why Yosys synthesis maps to NAND-heavy netlists.
-- [ ] Gate **propagation delay** is real — order ~10-100 ps per gate at modern nodes. Many gates in series → critical path → max clock frequency.
-- [ ] **Fan-out**: how many inputs a gate's output drives. High fan-out → slow.
-
-**Combinational vs sequential — first distinction:**
-- [ ] **Combinational** = output depends only on current inputs (gates, MUX, decoder, adder)
-- [ ] **Sequential** = output depends on inputs *and stored state* (flip-flop, register, FSM) — covered Week 5
-
-**Verilog basics (the language of hardware):**
-- [ ] Module skeleton:
-  ```verilog
-  module mux2 (input wire sel, input wire a, input wire b, output wire y);
-    assign y = sel ? b : a;
-  endmodule
-  ```
-- [ ] **Port directions**: `input`, `output`, `inout` (bidirectional, rare)
-- [ ] **Data types**: `wire` for combinational connections, `reg` for storage (used inside `always` blocks). Note `reg` doesn't imply a flip-flop — it's just a Verilog quirk.
-- [ ] **Operators you need today**: `&` (AND), `|` (OR), `^` (XOR), `~` (NOT), `?:` (ternary), `==`, `!=`, `<`, `>`, `+`, `-`, `<<`, `>>`
-- [ ] **`assign`** — for continuous combinational assignment outside `always` blocks
-- [ ] **`always @(*)`** — a combinational always block (re-evaluates whenever any input changes)
-- [ ] **Concatenation** `{a, b, c}` and **replication** `{4{1'b0}}` (= `4'b0000`)
-- [ ] **Vector literal syntax**: `4'b1010` (4-bit binary), `8'hAF` (8-bit hex), `16'd255` (16-bit decimal)
-
-**Testbench basics:**
-- [ ] `module tb_<name>;` — testbench is a module with no ports
-- [ ] **Drive inputs** with `reg` declarations; **observe outputs** with `wire` declarations connected to the DUT
-- [ ] `initial begin ... end` — runs once at simulation start
-- [ ] `#10` — wait 10 time units
-- [ ] `$display("a=%b b=%b y=%b", a, b, y);` — print values
-- [ ] `$dumpfile("tb.vcd"); $dumpvars(0, tb);` — record waves for GTKWave
-- [ ] `$finish;` — end simulation
-
-**🔨 Mini-project (pure W3 content):**
-- [ ] **2:1 MUX** in Verilog using both `assign` and `always @(*)` styles — verify both produce identical waveforms
-- [ ] **4:1 MUX** built from three 2:1 MUXes (instantiate sub-modules) — teaches hierarchical design
-- [ ] **3-to-8 decoder** — given 3-bit input, exactly one of 8 outputs is 1
-- [ ] **Testbench** that sweeps all input combinations and `$display`s a truth table
-- [ ] Run with `iverilog tb.v dut.v && vvp a.out` then open `tb.vcd` in GTKWave
-- [ ] **Engineering journal (3 sentences):** "An `atomicAdd` is just N parallel adders feeding a serial reducer; each adder is built from full-adders; each full-adder is built from XOR + AND gates I built today."
-
-**Optional companions (only if you want extra practice):** HDLBits modules 1-5 (Getting Started → Vectors), Harris & Harris Ch 1.
+### 🔧 Day 6 — Silicon: Digital Logic Foundations + First Verilog (START)
+> **LLM ↔ Silicon link:** every `atomicAdd` is N parallel adders → full-adders → XOR + AND gates you build today.
+- [ ] Two's complement: sign bit, range `[-2^(N-1), 2^(N-1)-1]`, negation = `~x + 1`, sign extension
+- [ ] Boolean algebra: AND, OR, XOR, NAND, NOR truth tables; DeMorgan's; NAND/NOR are universal (build any circuit)
+- [ ] CMOS gate transistor counts: NOT=2, NAND=4, NOR=4, AND=6, OR=6, XOR=8 — synthesizers prefer NAND
+- [ ] Combinational (no state) vs sequential (state in FFs) — today is pure combinational
+- [ ] Verilog basics: `module`, `input`/`output`, `wire`/`reg`, `assign`, `always @(*)`, vector literals (`4'b1010`, `8'hAF`)
+- [ ] Testbench basics: `initial begin...end`, `#10`, `$display`, `$dumpvars` for GTKWave waves
+- [ ] **Code:** 2:1 MUX (both `assign` and `always @(*)` styles), 4:1 MUX (hierarchical from 2:1s), 3-to-8 decoder; testbench sweeps all input combos and `$display`s truth table; run with `iverilog + vvp + gtkwave`
 
 ### 🔨 Saturday Project
 - [ ] **CUDA Reduction Library + MNIST Classifier**
@@ -1915,72 +1867,17 @@ Each week's Saturday morning (or Friday evening — your choice) you spend **1.5
 - [ ] Vocabulary size tradeoffs
 - [ ] **Code:** Implement BPE tokenizer from scratch, compare with HuggingFace tokenizers
 
-### 🔧 Day 6 — Silicon: Adders, Subtractors, and Combinational Arithmetic
-> **Connection to LLM track:** Today's LLM track introduced attention's QKV math — every dot product is a sum of products, and every sum bottoms out in **adders**. Today you build the adder hierarchy: half → full → ripple-carry → carry-lookahead. After today, the inner loop of every matmul is concrete to you in silicon.
-
-**Half-adder (the simplest adder):**
-- [ ] Inputs: `A`, `B`. Outputs: `Sum`, `Carry`.
-- [ ] Logic: `Sum = A ^ B`, `Carry = A & B`
-- [ ] Limitation: no carry-in → can't be chained for multi-bit addition
-- [ ] In Verilog:
-  ```verilog
-  module half_adder(input A, B, output Sum, Carry);
-    assign Sum   = A ^ B;
-    assign Carry = A & B;
-  endmodule
-  ```
-
-**Full-adder (the workhorse):**
-- [ ] Inputs: `A`, `B`, `Cin`. Outputs: `Sum`, `Cout`.
-- [ ] Logic: `Sum = A ^ B ^ Cin`, `Cout = (A & B) | (Cin & (A ^ B))`
-- [ ] Built from 2 half-adders + 1 OR gate (a clean hierarchical design)
-- [ ] Critical insight: a full-adder is the "1-bit slice" of any N-bit adder
-
-**Ripple-carry adder (RCA):**
-- [ ] Chain N full-adders, carry-out of stage `i` → carry-in of stage `i+1`
-- [ ] Verilog using `generate`:
-  ```verilog
-  module ripple_adder #(parameter N=4) (input [N-1:0] A, B, output [N-1:0] Sum, output Cout);
-    wire [N:0] C; assign C[0] = 1'b0;
-    genvar i;
-    generate for (i = 0; i < N; i = i + 1) begin : adder_chain
-      full_adder fa(A[i], B[i], C[i], Sum[i], C[i+1]);
-    end endgenerate
-    assign Cout = C[N];
-  endmodule
-  ```
-- [ ] **Critical-path delay**: the carry has to *ripple* through every stage. For 32 bits, that's 32 gate delays. Slow but minimal area.
-
-**Subtraction with the same adder:**
-- [ ] `A - B = A + (~B) + 1` (two's-complement trick)
-- [ ] Add a `mode` input (0 = add, 1 = sub): XOR `B` with `mode` (inverts when sub), feed `mode` into `Cin` (adds the +1 when sub)
-- [ ] Same hardware does ADD and SUB → exactly how every CPU's ALU works
-- [ ] **Overflow detection** for signed: `Cn ^ Cn-1` (carry-out of MSB ≠ carry-into-MSB → overflow)
-
-**Carry-lookahead adder (CLA) — concept only, don't implement yet:**
-- [ ] Why RCA is slow: carry serially propagates
-- [ ] CLA idea: pre-compute "**generate**" `Gi = Ai · Bi` and "**propagate**" `Pi = Ai ⊕ Bi`, then carry at any position is computed in `O(log N)` depth
-- [ ] Used in real CPUs at 32-bit and beyond. You'll see it in your synthesis output later.
-
-**Comparators:**
-- [ ] **Equality**: `A == B` ↔ `~|(A ^ B)` (XOR each bit, OR all results, invert)
-- [ ] **Less-than (unsigned)**: subtract `A - B`, look at the borrow-out (carry-out of inverted-add)
-- [ ] **Less-than (signed)**: more complex — overflow flag matters
-
-**Decoders & encoders (revisit + extend):**
-- [ ] **3-to-8 decoder**: 3 inputs → 8 outputs, exactly one is 1 → `decode[i] = (in == i)`
-- [ ] **8-to-3 encoder**: 8 inputs (assumed 1-hot) → 3-bit output identifying which input is 1
-- [ ] **Priority encoder**: input not 1-hot, output gives the *highest* set bit's index — used in MMU lookups, allocator, scheduler
-
-**🔨 Mini-project (pure W3 + W4 content):**
-- [ ] `half_adder.v` (2 lines of logic, basic testbench)
-- [ ] `full_adder.v` instantiating two `half_adder`s + an `OR` (hierarchical design)
-- [ ] `ripple_adder.v` parameterized to width `N` using `generate`
-- [ ] `add_sub.v` — adder/subtractor with a `mode` input, with overflow flag output
-- [ ] **Testbench** that sweeps 100 random A/B pairs, computes expected `A+B`, `A-B`, `A==B`, `A<B` in Verilog `initial` block (using built-in `+`, `-`, `==`, `<`), and `$display`s pass/fail per case
-- [ ] Engineering journal (3 sentences): "Every CUDA reduction is a tree of these adders. A 32-element reduce is 5 levels of full-adders. The reason `atomicAdd` is slow is not the addition — it's the serialization across threads."
-
-**Optional companions:** HDLBits modules 6-15 (Modules / Procedures / More Verilog Features), Harris & Harris Ch 5.2 (arithmetic circuits).
+### 🔧 Day 6 — Silicon: Adders, Subtractors, Comparators
+> **LLM ↔ Silicon link:** every CUDA reduction is a tree of adders; today you build the leaf cells.
+- [ ] Half-adder: `Sum = A^B`, `Carry = A&B` — no carry-in, can't chain
+- [ ] Full-adder: `Sum = A^B^Cin`, `Cout = (A&B) | (Cin & (A^B))` — built from 2 half-adders + OR
+- [ ] Ripple-carry adder: chain N full-adders; carry serially propagates → slow critical path (~N gate delays)
+- [ ] Subtraction trick: `A - B = A + ~B + 1` → one adder + XOR(B, mode) + Cin=mode does both ADD and SUB
+- [ ] Signed overflow detection: `Cn ^ Cn-1` (carry into MSB ≠ carry out of MSB)
+- [ ] Carry-lookahead concept (don't implement): pre-compute `Gi = Ai·Bi`, `Pi = Ai^Bi` → carry in `O(log N)` depth
+- [ ] Comparators: equality `~|(A^B)`, less-than via subtract + borrow-out
+- [ ] Encoder/decoder: 3-to-8 decoder (one-hot from binary), 8-to-3 encoder, priority encoder (highest set bit)
+- [ ] **Code:** `half_adder.v`, `full_adder.v` (hierarchical from half_adders), `ripple_adder.v` (parameterized N via `generate`), `add_sub.v` (adder/subtractor with overflow flag); testbench sweeps 100 random `(A,B)` pairs and verifies `A+B`, `A-B`, `A==B`, `A<B` against Verilog built-ins
 
 ### 🔨 Saturday Project
 - [ ] **Character-Level Language Model**
@@ -2043,89 +1940,17 @@ Each week's Saturday morning (or Friday evening — your choice) you spend **1.5
 - [ ] Teacher forcing during training
 - [ ] **Code:** Implement full Transformer (encoder + decoder)
 
-### 🔧 Day 6 — Silicon: Sequential Logic + Flip-Flops + FSMs + Shift-Add Multiplier
-> **Connection to LLM track:** The Transformer's autoregressive decode loop is conceptually a finite state machine — clock tick = generate-next-token. The KV-cache is just a giant register. Today you learn how state actually lives in silicon: flip-flops, FSMs, and your first multi-cycle datapath (a shift-add multiplier).
-
-**Why we need state (motivation):**
-- [ ] Combinational circuits = pure functions: outputs are a fixed function of current inputs
-- [ ] Real systems need **memory**: a counter must remember its previous value; an FSM must remember its current state; a CPU must remember its register file
-- [ ] Storage element: **flip-flop** (FF), holds 1 bit; capture happens on clock edge
-
-**The D flip-flop (DFF) — the universal storage element:**
-- [ ] Inputs: `D` (data), `clk` (clock). Output: `Q`. On rising edge of `clk`, `Q` ← `D`. Otherwise `Q` holds.
-- [ ] Verilog idiom (positive-edge-triggered with synchronous reset):
-  ```verilog
-  always @(posedge clk) begin
-    if (rst) Q <= 1'b0;
-    else     Q <= D;
-  end
-  ```
-- [ ] Asynchronous reset: `always @(posedge clk or posedge rst)` — preferred for power-on
-- [ ] **Setup time** (`Tsu`): `D` must be stable BEFORE the rising clock edge by at least `Tsu`
-- [ ] **Hold time** (`Th`): `D` must remain stable AFTER the rising edge by at least `Th`
-- [ ] **Clock-to-Q delay** (`Tcq`): `Q` updates `Tcq` after the edge (~50-200 ps in modern process nodes)
-- [ ] **Metastability**: if `D` violates setup/hold, `Q` may oscillate or settle late → real bug source
-
-**Blocking vs non-blocking — get this RIGHT or you'll have race conditions for life:**
-- [ ] **`=` (blocking)** — used in combinational `always @(*)` blocks. Updates immediately, in order.
-- [ ] **`<=` (non-blocking)** — used in sequential `always @(posedge clk)` blocks. RHS values captured first, then assignments happen "in parallel" at the next time step.
-- [ ] **Rule**: comb → blocking, seq → non-blocking. Mixing causes simulation/synthesis mismatch.
-- [ ] Why: in `always @(posedge clk) begin a <= b; b <= a; end`, with `<=`, this swaps `a` and `b`. With `=`, both end up holding the original `b`.
-
-**Counters and shift registers:**
-- [ ] **Up-counter**:
-  ```verilog
-  always @(posedge clk) begin
-    if (rst) count <= 0;
-    else if (en) count <= count + 1;
-  end
-  ```
-- [ ] **Shift register**: chain of FFs, each FF's `Q` feeds next FF's `D` → data shifts on each clock
-- [ ] **Loadable shift register**: a control signal selects between "shift" mode (Q[N-1:1] = Q[N-2:0]) and "load" mode (Q = parallel_in)
-- [ ] Used everywhere: serializer/deserializer (UART), barrel shifter, multiplier datapath
-
-**Finite State Machines (FSMs):**
-- [ ] Three components: **state register** (FFs), **next-state logic** (combinational), **output logic** (combinational)
-- [ ] **Moore FSM**: outputs depend only on current state → cleaner timing, slower reactions
-- [ ] **Mealy FSM**: outputs depend on current state AND inputs → faster but glitchier
-- [ ] **State encoding**: binary (compact), one-hot (faster, more FFs), gray (only 1 bit changes per transition — used in async FIFOs Week 12)
-- [ ] Standard 2-process Verilog idiom:
-  ```verilog
-  // sequential: state register
-  always @(posedge clk) begin
-    if (rst) state <= IDLE;
-    else     state <= next_state;
-  end
-  // combinational: next-state + output logic
-  always @(*) begin
-    next_state = state;       // default: stay
-    case (state)
-      IDLE:  if (start) next_state = WORK;
-      WORK:  if (done)  next_state = IDLE;
-    endcase
-  end
-  ```
-
-**Shift-add multiplier (your first multi-cycle datapath):**
-- [ ] Algorithm for `A × B` (N-bit unsigned): zero-init a 2N-bit `product`, for `i` in `0..N-1`: if `B[i]` is 1, add `A << i` to `product`. Done in N cycles.
-- [ ] Datapath: a `2N`-bit `product` register, an `N`-bit shifted `A` register, the LSB-tested `B` register, an N+1-bit adder
-- [ ] Control: an FSM with states `IDLE → ITER → DONE`, plus a counter for `i = 0..N-1`
-- [ ] Why this matters: it's the **silicon ancestor** of every multiplier in your GPU. Real Tensor Cores parallelize all N add-shifts spatially; you do them in time.
-
-**🔨 Mini-project (pure W3 + W4 + W5 content — uses only adder from W4 + FFs from W5):**
-- [ ] `dff.v` — D flip-flop with synchronous reset (uses W5 only)
-- [ ] `counter.v` — N-bit loadable up-counter (uses W5 only)
-- [ ] `shift_reg.v` — N-bit loadable left-shift register (uses W5 only)
-- [ ] `traffic_light_fsm.v` — Moore FSM with states `RED → GREEN → YELLOW → RED`, using a counter to time each phase. Add a "pedestrian-call" input that prematurely shortens GREEN.
-- [ ] **Centerpiece — `mult_seq.v`**: a 4-bit unsigned shift-add multiplier
-  - State register: `IDLE | ITER | DONE`
-  - Datapath: 8-bit `product`, 4-bit shifted `a_reg`, 4-bit `b_reg`, 3-bit counter
-  - Reuses your W4 `ripple_adder` for the conditional-add
-  - Handshake: input port has `start`, output port has `done` and `product`
-- [ ] **Testbench** that drives 50 random A,B pairs (4-bit each), starts the multiplier, waits for `done`, compares against `A*B` computed with Verilog's built-in `*`. Print pass/fail.
-- [ ] **Engineering journal (3 sentences):** "An autoregressive decoder is an FSM: state = generated tokens so far, next-state logic = the LLM forward pass, output = next token. The KV-cache is the state register. Each token is one clock cycle of this giant FSM."
-
-**Optional companions:** HDLBits modules 16-30 (Latches & FFs, Counters, FSMs), Harris & Harris Ch 3.
+### 🔧 Day 6 — Silicon: Sequential Logic, Flip-Flops, FSMs, First Multiplier
+> **LLM ↔ Silicon link:** the autoregressive decode loop is an FSM; KV-cache is the state register; one token = one clock tick of this giant FSM.
+- [ ] D flip-flop: `Q ← D` on rising clock edge; setup time `Tsu`, hold time `Th`, clock-to-Q `Tcq`; metastability when setup/hold violated
+- [ ] Verilog idiom: `always @(posedge clk) begin if (rst) Q <= 0; else Q <= D; end`
+- [ ] Blocking `=` (use in comb `always @(*)`) vs non-blocking `<=` (use in seq `always @(posedge clk)`) — mixing causes silent race conditions
+- [ ] Counter: `if (en) count <= count + 1`; shift register: chain of FFs, optional load input
+- [ ] FSM = state register (FFs) + next-state logic (comb) + output logic (comb); Moore (output from state) vs Mealy (output from state+input)
+- [ ] State encoding: binary (compact), one-hot (faster), gray (only 1 bit changes — used in async FIFOs)
+- [ ] 2-process FSM idiom: one `always @(posedge clk)` for state register, one `always @(*)` for next-state + outputs
+- [ ] Shift-add multiplier algorithm: for each bit `i` of B, conditionally add `A << i` to product; N cycles for N-bit multiply
+- [ ] **Code:** `dff.v`, `counter.v`, `shift_reg.v`, `traffic_light_fsm.v` (RED→GREEN→YELLOW with timer + pedestrian-call), and `mult_seq.v` (4-bit unsigned shift-add multiplier reusing your W4 `ripple_adder`); testbench drives 50 random `(A,B)` pairs, waits for `done`, verifies against `A*B`
 
 ### 🔨 Saturday Project
 - [ ] **Build GPT from Scratch (Part 1)**
@@ -2180,56 +2005,18 @@ Each week's Saturday morning (or Friday evening — your choice) you spend **1.5
 - [ ] **Explore:** build.nvidia.com — try NVIDIA-hosted LLMs via API (free tier)
 - [ ] **Code:** Fine-tune BERT for sentiment analysis with HF Trainer
 
-### 🔧 Day 6 — Silicon: The MAC Unit (a Tensor Core in Silicon)
-> **Connection to LLM track:** Today's LLM track is **cuBLAS + Tensor Cores via WMMA**. A Tensor Core is *literally* a small array of multiply-accumulate (MAC) units. Today you build that primitive. After today, when you write `mma.sync.aligned.m16n8k16.row.col.bf16.bf16.f32.f32`, you can picture the exact circuit it lights up — 128 MAC units running in parallel inside one warp slot.
-
-**What is a MAC?**
-- [ ] **MAC = Multiply-Accumulate**: `c = a * b + c`. One operation. Performed in one (or a few pipelined) clock cycles.
-- [ ] Why it's the most important AI primitive: every dot product is a sum of MACs. Every matmul is a 2D grid of MACs. Every conv is a 3D pattern of MACs. **>99% of LLM compute is MACs.**
-- [ ] In FP32 hardware, this is called an **FMA** (Fused Multiply-Add) — *fused* means rounding happens once at the end, not after the multiply. Higher precision than separate × then +.
-
-**1-bit MAC (the building block of the building block):**
-- [ ] On 1-bit operands: `a * b = a AND b`, accumulate is just `+ c_in`
-- [ ] So a 1-bit MAC is: `c_out = (a AND b) + c_in` → one full-adder driven by an AND gate
-- [ ] The Tensor Core is conceptually a stack of these for a wider word
-
-**N-bit unsigned MAC datapath:**
-- [ ] **Multiplier**: an N-bit × N-bit multiplier produces a 2N-bit product. You can build it with a parallel array of full-adders (one row per bit of `b`) — this is called an **array multiplier**, hardware-parallel version of last week's shift-add multiplier.
-- [ ] **Accumulator**: a register `acc` of width 2N + log₂(K) where K is max accumulation depth (extra bits for headroom)
-- [ ] **Pipelining**: split into 2 stages (multiply, then add) with a pipeline register between → roughly doubles clock frequency at the cost of 1 cycle latency
-- [ ] **Latency vs throughput**: pipelined MAC has 2-cycle *latency* but 1-MAC-per-cycle *throughput*
-
-**Signed MAC (handling two's complement):**
-- [ ] When operands are signed two's complement, the array multiplier needs **sign-extension** of partial products, OR
-- [ ] Use **Booth encoding** (recodes 2 bits at a time to reduce the number of partial products) — concept only today, no implementation
-- [ ] Quickest correct approach: cast to wider unsigned, multiply, cast back (works because Verilog `signed` does this for you):
-  ```verilog
-  wire signed [N-1:0] a, b;
-  wire signed [2*N-1:0] prod = a * b;
-  ```
-
-**Saturating accumulate (overflow handling for AI):**
-- [ ] Default behavior: accumulator wraps on overflow (`max + 1 = min`) → catastrophic for AI
-- [ ] **Saturating**: clamp to `+max` or `-min` on overflow. Detect by checking the sign bit pattern after the add.
-- [ ] FP32 doesn't need this (overflow → ±inf), but INT8/INT4 MACs do. This is what Tensor Cores actually do for INT precisions.
-
-**The Tensor Core as an array of MACs:**
-- [ ] Volta WMMA: 16×16×16 BF16 GEMM in one warp instruction = 4096 MACs in flight per warp
-- [ ] How: 16×16 systolic array of MACs, each consuming one A-element + one B-element per cycle, accumulating in place
-- [ ] Hopper WGMMA: 64×8 dimension, asynchronous (issues, then warps continue while it computes), uses TMA for input feed
-- [ ] **What you're building today is one MAC cell out of those 4096+. The architectural step from your single MAC to a Tensor Core is just *replication + interconnect*.**
-
-**🔨 Mini-project (Month 2 Project C build is now in progress — uses ONLY W3+W4+W5+W6 content):**
-- [ ] **`mac1.v`** — 1-bit MAC: `c_out = (a & b) ^ c_in; carry_out = (a & b & c_in) | ...` (it's a full-adder with the multiply pre-baked)
-- [ ] **`array_mult.v`** — 4-bit × 4-bit unsigned array multiplier built from W4 `full_adder` cells in a 4×4 grid (16 partial products, summed by ripple). Compare its output against a behavioral `assign prod = a * b`.
-- [ ] **`mac_unsigned.v`** — N-bit (parameter) MAC unit: `c_next = a * b + c`, with one register on the output (1-cycle latency), parameterized to width 4 (for now, will scale to 8 in Week 7)
-- [ ] **`mac_signed.v`** — same but with `signed` types, verified for negative inputs
-- [ ] **`mac_saturating.v`** — same but with overflow detection that clamps to ±max
-- [ ] **Testbench** — feed 100 random (a, b, c) triples, compare against a Python or behavioral Verilog reference (`reg signed [2*N+8-1:0] expected = a * b + c; saturated = (expected > MAX) ? MAX : ...`)
-- [ ] **Hand-drawn schematic** — on paper, sketch a **4×4 weight-stationary array of MAC units** (16 MACs in a grid). Label data flow: weights pre-loaded into each PE, activations flow horizontally, partial sums flow vertically. This drawing is your "Tensor Core in 1 page" — keep it.
-- [ ] **Engineering journal (3 sentences):** "A Tensor Core's `mma.sync` instruction lights up exactly N=4096 of my MAC cells working in parallel. The reason BF16 is fast is the multiplier inside each MAC is smaller (~half the gates of FP32). The reason FP4/FP6 in Blackwell is even faster is the multiplier is 4× smaller still."
-
-**Project C — Month 2 (Logic-Lab — Gates to GEMM) status:** repo `silicon/month02/` now contains gates, MUXes, decoder (W3) + adder/subtractor (W4) + flip-flops/counter/FSM/multiplier (W5) + 4 MAC variants (W6). Two more Day-6 sessions to wrap up: W7 STA on the MAC, W8 Yosys synthesis + final README.
+### 🔧 Day 6 — Silicon: The MAC Unit — A Tensor Core in Silicon
+> **LLM ↔ Silicon link:** a Tensor Core's `mma.sync` instruction is exactly 4096 of these MAC cells running in parallel.
+- [ ] MAC = multiply-accumulate: `c = a*b + c` in one (or pipelined) cycle — ~99% of LLM compute is MACs
+- [ ] FMA = fused multiply-add: rounding once at the end → higher precision than separate `*` then `+`
+- [ ] 1-bit MAC: `a*b = a AND b`, accumulate is `+ c_in` → one full-adder driven by an AND gate
+- [ ] N-bit array multiplier: parallel grid of full-adders, one row per bit of B (parallel version of W5's shift-add)
+- [ ] Accumulator width: `2N + log₂(K)` where K = max accumulation depth (headroom for sums)
+- [ ] Pipelined MAC: split into multiply + add stages with a register between → 2-cycle latency, 1-MAC-per-cycle throughput, ~2× higher Fmax
+- [ ] Signed MAC: use Verilog `signed` types or sign-extend partial products; Booth encoding (concept only) reduces partial product count
+- [ ] Saturating accumulate: detect overflow, clamp to ±max instead of wrapping (mandatory for INT8/INT4 AI)
+- [ ] Tensor Core mapping: Volta WMMA 16×16×16 BF16 = 4096 MACs/warp; Hopper WGMMA = async, fed by TMA
+- [ ] **Code:** `mac1.v` (1-bit), `array_mult.v` (4×4 unsigned grid built from W4 `full_adder`s, vs behavioral `*`), `mac_unsigned.v`, `mac_signed.v`, `mac_saturating.v` (parameterized to width N); testbench feeds 100 random `(a,b,c)` triples vs Python reference; hand-drawn 4×4 weight-stationary array schematic ("Tensor Core in 1 page")
 
 ### 🔨 Saturday Project
 - [ ] **GPT-2 Small from Scratch**
@@ -2285,61 +2072,16 @@ Each week's Saturday morning (or Friday evening — your choice) you spend **1.5
 - [ ] **Code:** Compare `torch.compile` vs eager mode, profile both; add simple logit-lens probes to your small model
 
 ### 🔧 Day 6 — Silicon: Static Timing Analysis (Setup, Hold, Slack, Critical Path)
-> **Connection to LLM track:** Today's Nsight Compute analysis asks "what's the slowest path through the kernel?" — that's the **exact same question STA asks at the gate level**: "what's the longest combinational path between two flip-flops?" Both questions define your maximum clock frequency. The vocabulary is identical — critical path, slack, throughput. Today you learn to ask it at the silicon layer.
-
-**Why timing matters (the fundamental clock-period equation):**
-- [ ] Every flip-flop captures `D` on the rising clock edge. For that capture to be correct, the data must be **stable** for `Tsu` before the edge and `Th` after.
-- [ ] The clock period `Tclk` must satisfy:
-  ```
-  Tclk ≥ Tcq + Tcomb_max + Tsu + Tskew
-  ```
-  where `Tcq` = FF clock-to-Q delay, `Tcomb_max` = longest combinational delay between two FFs, `Tsu` = setup time of receiving FF, `Tskew` = clock skew between source and dest FFs.
-- [ ] Equivalently: **maximum frequency** is `1 / Tclk`. To go faster, you must shorten `Tcomb_max`.
-
-**Setup time and slack:**
-- [ ] **Required time** (when the data must arrive at the destination FF's `D`): `Tclk - Tsu`
-- [ ] **Arrival time**: `Tcq + Tcomb_max`
-- [ ] **Setup slack** = `required - arrival` = `Tclk - Tsu - Tcq - Tcomb_max`
-- [ ] **Slack ≥ 0 required** for correct operation. Slack < 0 = setup violation = silicon will fail at this frequency. You either lower frequency or shorten the path.
-
-**Hold time and slack:**
-- [ ] Hold check: data must NOT change for `Th` AFTER the clock edge
-- [ ] **Hold slack** = `Tcq + Tcomb_min - Th - Tskew`. Note `min` not `max` here — the *fastest* path is the threat.
-- [ ] If `Tcomb_min < Th - Tcq + Tskew` → hold violation. Fix: insert buffers to slow the fastest path. *Hold violations cannot be fixed by reducing frequency* — they're frequency-independent.
-
-**Critical path:**
-- [ ] = the path with the **smallest setup slack** in the design
-- [ ] STA tools (OpenSTA, PrimeTime) report the worst N paths, the gates on each path, and arrival/required times at each pin
-- [ ] Real engineering work: identify critical path → restructure logic to shorten it (retiming, pipelining, balanced trees, faster gates)
-
-**Hand-computation example (work this through carefully):**
-- [ ] Given: `Tclk = 5 ns`, `Tcq = 0.3 ns`, `Tcomb_max = 3.5 ns`, `Tsu = 0.4 ns`, `Tskew = 0.2 ns`
-- [ ] Setup slack = `5.0 - 0.3 - 3.5 - 0.4 - 0.2 = 0.6 ns` ✓ (positive, design works at 200 MHz)
-- [ ] Now try: same numbers but `Tclk = 4 ns` (250 MHz target)
-- [ ] Setup slack = `4.0 - 0.3 - 3.5 - 0.4 - 0.2 = -0.4 ns` ✗ (negative, fails at 250 MHz)
-- [ ] Two fixes: (a) lower frequency to ≤ 222 MHz, or (b) shorten `Tcomb_max` (e.g., pipeline by adding a register mid-path)
-
-**Pipelining as a slack fix:**
-- [ ] **Insert a register** in the middle of a long combinational path → splits one big `Tcomb_max` into two smaller ones
-- [ ] Trade-off: latency (in cycles) increases by 1, but throughput (per-second) increases proportionally to frequency gain
-- [ ] This is *exactly* what your shift-add multiplier did vs an all-combinational multiplier — multi-cycle for higher frequency
-
-**Race conditions and metastability:**
-- [ ] **Race condition**: two paths to the same destination with different delays → can produce wrong values during the brief window
-- [ ] **Metastability**: setup/hold violation → FF output can hover between 0 and 1 for an indefinite time. Any signal crossing clock domains needs a **2-FF synchronizer**.
-
-**OpenSTA workflow (you'll use it next week with Yosys):**
-- [ ] Inputs: synthesized gate-level netlist (Verilog), Liberty (.lib) standard-cell timing files, SDC constraints (clock period, IO delays)
-- [ ] Output: timing report — worst paths, slack values, fanout/cap data, suggestions
-- [ ] SDC essentials: `create_clock -period 5 [get_ports clk]`, `set_input_delay`, `set_output_delay`, `set_false_path` (path that doesn't matter), `set_multicycle_path` (path allowed > 1 cycle)
-
-**🔨 Mini-project (uses ONLY your existing W3-W6 modules — no new builds, this is analysis week):**
-- [ ] **Hand-compute STA on `ripple_adder.v` (W4)**: assume each gate has `Tg = 0.1 ns`, FF `Tcq = 0.3 ns`, `Tsu = 0.4 ns`. What's the longest combinational path through a 4-bit ripple adder? An 8-bit one? A 32-bit one? At what bit width does ripple-carry stop fitting in a 1 ns clock period (1 GHz)? *(This computation explains why CLA exists.)*
-- [ ] **Hand-compute STA on `mac_unsigned.v` (W6)**: longest path = multiplier + adder + accumulator-feedback. Estimate `Tcomb_max` for 4-bit, 8-bit, 16-bit. How would you split this into 2 pipeline stages?
-- [ ] **Pipeline your MAC**: take `mac_unsigned.v` and insert a register between the multiplier output and the accumulator adder. Now it has 2-cycle latency but should run at higher frequency. Verify the testbench from Week 6 still passes (just delayed by 1 cycle).
-- [ ] **Engineering journal (3 sentences):** "Nsight reports my kernel is 'memory bandwidth limited at 87% of speed-of-light.' OpenSTA reports my MAC's critical path has 0.6 ns of slack at 1 GHz. Both numbers answer the same question: how close to the hardware's physical maximum am I running?"
-
-**Optional companions:** HDLBits Timing problems, Harris & Harris §3.5.
+> **LLM ↔ Silicon link:** Nsight's "speed-of-light" analysis is the same question STA asks at the gate level — both find the slowest path that limits frequency.
+- [ ] Clock period equation: `Tclk ≥ Tcq + Tcomb_max + Tsu + Tskew` → max frequency = `1 / Tclk`
+- [ ] Setup slack = `Tclk - Tsu - Tcq - Tcomb_max`; must be ≥ 0 (else silicon fails at that freq)
+- [ ] Hold slack = `Tcq + Tcomb_min - Th - Tskew`; uses `min` path; hold violations are frequency-independent (fix by inserting buffers)
+- [ ] Critical path = path with smallest setup slack; STA tools report top-N worst paths
+- [ ] Hand-compute example: `Tclk=5ns, Tcq=0.3, Tcomb=3.5, Tsu=0.4, Tskew=0.2 → slack=0.6ns ✓`; tighten to 4ns → slack `-0.4ns ✗`
+- [ ] Pipelining as fix: insert register mid-path → splits one big `Tcomb_max` into two smaller ones; +1 cycle latency, ~2× Fmax
+- [ ] Metastability: setup/hold violation → FF output hovers; CDC signals need 2-FF synchronizer
+- [ ] OpenSTA flow: inputs = netlist + Liberty `.lib` + SDC; SDC essentials: `create_clock`, `set_input_delay`, `set_false_path`, `set_multicycle_path`
+- [ ] **Code:** hand-compute longest path through W4 `ripple_adder` for N=4/8/32 (assume `Tg=0.1ns`) — at what width does it fail 1 GHz?; hand-compute `Tcomb_max` for W6 `mac_unsigned`; pipeline the MAC by inserting a register between multiplier and accumulator-add, verify W6 testbench still passes (1-cycle delayed)
 
 ### 🔨 Saturday Project
 - [ ] **LLaMA-Style Model with All Modern Features**
@@ -2401,68 +2143,16 @@ Each week's Saturday morning (or Friday evening — your choice) you spend **1.5
 - [ ] Why Transformers replaced CNNs in vision: ViT showed attention over patches beats convolutions
 - [ ] **Code:** Build CNN for CIFAR-10 (Conv → BatchNorm → ReLU → Pool → FC), achieve >85% accuracy
 
-### 🔧 Day 6 — Silicon: Memory Cells, Memory Hierarchy + First Yosys Synthesis (M2 Project C SHIPS)
-> **Connection to LLM track:** This week's LLM topic is **HBM2/HBM3 bandwidth and NVLink** — the GPU memory architecture. Day 6 zooms into the *physics* of every tier of that hierarchy: 6T SRAM cells (fast, small), 1T1C DRAM cells (dense, slow), how HBM stacks dies for bandwidth, and why "memory-bound" is a physics statement, not a software one. Then you run your first Yosys synthesis to physically realize Month 2's MAC unit on a real PDK.
-
-**Memory tiers and their physical reality:**
-- [ ] **Register file (~10s of bytes per FF)**: an array of D flip-flops. Fastest (~50 ps access), most expensive per bit (~6 transistors per bit minimum), highest power per bit. This is your CPU's register file (W9 Project C).
-- [ ] **SRAM (KB to MB)**: dense storage using cross-coupled inverters. ~5T-8T per bit. Used for L1/L2 cache, GPU shared memory, FPGA BRAM. ~1-5 ns access.
-- [ ] **DRAM (GB)**: storage in a capacitor. 1 transistor + 1 capacitor per bit (1T1C). ~50 ns access. Needs **refresh** every ~64 ms (capacitor leaks). HBM is just stacked DRAM.
-- [ ] **NVMe SSD (TB)**: floating-gate transistors. ~100 µs access. We don't touch this.
-
-**The 6T SRAM cell (the workhorse of on-chip memory):**
-- [ ] Topology: 2 cross-coupled inverters form a bistable latch (4 transistors), 2 access transistors gate read/write to bitlines (2 more) → 6T
-- [ ] Why bistable: the cross-coupling makes the cell stable in either "0" or "1" — it actively *holds* the value as long as power is on. No refresh needed → **static** RAM.
-- [ ] Read: precharge bitlines high, assert wordline, the cell pulls one bitline slightly low, sense amplifier detects difference. Destructive? No — read is non-destructive in SRAM.
-- [ ] Write: drive bitlines opposite, assert wordline, the strong drive overpowers the weak cross-coupling → flip the cell.
-- [ ] **Why you can't have huge SRAM**: 6T per bit + the wordline/bitline overhead → ~150 µm² per Mbit at 65 nm, even smaller at advanced nodes but still expensive.
-
-**The 1T1C DRAM cell (density wins):**
-- [ ] 1 access transistor + 1 capacitor (charge stores the bit)
-- [ ] Read: assert wordline, capacitor charge dumps onto bitline → tiny signal → sense amplifier. **Destructive read** (capacitor empties) → must immediately rewrite (refresh-after-read).
-- [ ] **Periodic refresh**: every ~64 ms, all rows must be read+rewritten or the capacitor leakage corrupts data. This is why DRAM has built-in refresh logic.
-- [ ] Why density: 1T1C ≪ 6T → ~10× more bits per area. This is why your laptop has 16 GB of DRAM and only ~32 MB of SRAM cache.
-- [ ] Why slow: capacitor charging takes time (RC), and the pre-charge + sense + restore cycle is long.
-
-**HBM (High Bandwidth Memory) — DRAM stacked vertically:**
-- [ ] HBM = stacked DRAM dies (4-12 deep) with **TSVs** (Through-Silicon Vias) connecting them, sitting on a silicon **interposer** next to the GPU die
-- [ ] Why bandwidth: 1024-bit-wide interface per stack × multiple stacks → terabytes/sec. HBM3e = 1.2 TB/s per stack, ~5 TB/s for an H100's 5-stack package.
-- [ ] Why it's expensive: TSV manufacturing is hard, interposer is large, advanced packaging is low-yield → HBM costs ~$10/GB vs DDR5 at ~$2/GB.
-- [ ] Why you care: every LLM decode token is a re-read of the entire weight set. **HBM bandwidth is the speed of decode**. This is the "memory wall."
-
-**Memory access patterns and the silicon reason for coalescing:**
-- [ ] DRAM rows are physical: opening a row (page) takes ~50 ns; subsequent reads in the same row take ~5 ns; jumping rows requires close + open
-- [ ] **Coalesced reads (32 threads access 32 contiguous bytes)** = same DRAM row → one open, 32 reads → fast
-- [ ] **Strided reads** = different rows → many opens → slow
-- [ ] This is *physical*, not a software convention. Silicon is why CUDA's coalescing rule exists.
-
-**First Yosys synthesis run (the magic moment — RTL becomes gates):**
-- [ ] Yosys flow: `read_verilog file.v` → `synth -top mymodule` → `dfflibmap -liberty <pdk>.lib` → `abc -liberty <pdk>.lib` → `stat`
-- [ ] Output: a **gate-level netlist** that maps your RTL to the actual standard cells of a PDK (e.g., `sky130_fd_sc_hd__nand2_1`, `sky130_fd_sc_hd__dfxtp_2`)
-- [ ] Stats report: count of cells per type, total area in µm², critical path estimate
-- [ ] Quick install: `sudo apt install yosys` (Linux) / `brew install yosys` (Mac), or use the Docker image. PDK: download Sky130 standard-cell `.lib` from Google's open-PDK release.
-
-**Yosys + OpenSTA pairing (verify timing on the synthesized netlist):**
-- [ ] After Yosys produces the netlist + SDF (delay file), feed both into OpenSTA
-- [ ] OpenSTA reads `.lib` for cell delays + your SDC for constraints + the netlist topology → reports actual slack on real cells
-- [ ] You'll see numbers like "WNS = 0.32 ns at the path from `mac.acc[5]` through `add_chain.fa[7]` to `mac.acc[5]`" — this is your hand-computed slack, real this time.
-
-**🔨 Mini-project — Month 2 Project C SHIPS this Buffer Week (uses ONLY W3-W8 content):**
-- [ ] **Combine all M2 modules into one repo** `silicon/month02_logic_lab/`:
-  - W3: `mux2.v`, `mux4.v`, `decoder3to8.v`
-  - W4: `half_adder.v`, `full_adder.v`, `ripple_adder.v`, `add_sub.v`
-  - W5: `dff.v`, `counter.v`, `shift_reg.v`, `traffic_light_fsm.v`, `mult_seq.v`
-  - W6: `mac1.v`, `array_mult.v`, `mac_unsigned.v`, `mac_signed.v`, `mac_saturating.v`
-  - W7: `mac_pipelined.v` (pipelined version of `mac_unsigned.v`)
-  - W8: ALL of the above run through **Yosys synthesis on Sky130** with stats
-- [ ] **Run Yosys on `mac_unsigned.v`**: report total cell count, area in µm², which standard cells were used. Save the gate-level netlist.
-- [ ] **Run OpenSTA on the netlist** with `Tclk = 5 ns` SDC constraint: report WNS (worst negative slack). Compare to your Week-7 hand calculation.
-- [ ] **Push the clock period down** until WNS goes negative — this is your design's max frequency on Sky130. Document it.
-- [ ] **README.md** explaining: what each module does, the build progression (W3 → W8), the Yosys + OpenSTA results
-- [ ] **Hand-drawn schematic** from W6 included as `tensor_core_in_one_page.png`
-- [ ] **Engineering journal (3 sentences):** "I have built every primitive of a Tensor Core: gates, adders, multipliers, MACs. My MAC runs at 800 MHz on Sky130 130nm. An H100's Tensor Core runs at 1.8 GHz on TSMC 4nm with 4096 such MACs in parallel — I now understand exactly why an H100 is fast."
-
-**Optional companions:** HDLBits "Memory" + "Larger Circuits" modules, NVIDIA Blackwell whitepaper §3 (HBM subsystem).
+### 🔧 Day 6 — Silicon: Memory Cells, HBM, and First Yosys+OpenSTA on Sky130 (M2 Project C SHIPS)
+> **LLM ↔ Silicon link:** the "memory wall" you hear about in LLM decode is a physical wire problem; today you see why HBM, SRAM, and coalescing exist at the silicon level.
+- [ ] Memory tiers: register file (FFs, ~50 ps, 6T+ per bit) → SRAM (~1-5 ns, 5-8T) → DRAM (~50 ns, 1T1C, refresh) → SSD
+- [ ] 6T SRAM cell: 2 cross-coupled inverters (bistable, no refresh) + 2 access transistors → fast but ~10× larger than DRAM per bit
+- [ ] 1T1C DRAM cell: 1 transistor + 1 capacitor → dense; destructive read needs refresh after; ~64 ms refresh interval
+- [ ] HBM: stacked DRAM dies (4-12 deep) with TSVs on a silicon interposer; 1024-bit interface × multiple stacks → TB/s; HBM3e ≈ 1.2 TB/s/stack
+- [ ] Why coalescing exists in silicon: opening a DRAM row ~50 ns, subsequent reads in same row ~5 ns; coalesced reads hit one open row, strided reads thrash row buffers
+- [ ] Yosys flow: `read_verilog → synth -top → dfflibmap -liberty <pdk>.lib → abc -liberty → stat → write_verilog`; output is gate-level netlist mapped to standard cells (e.g., `sky130_fd_sc_hd__nand2_1`)
+- [ ] OpenSTA flow: read Liberty + netlist + SDC → `report_checks` → WNS (worst negative slack) on real cells
+- [ ] **Code (Project C M2 SHIPS):** combine all W3-W7 modules into `silicon/month02_logic_lab/`; run Yosys synthesis of `mac_unsigned.v` on Sky130 (cell count, area, gate types); run OpenSTA at `Tclk=5ns`; push period down until WNS negative → record Fmax; write README; commit hand-drawn schematic as `tensor_core_in_one_page.png`
 
 ### 🔨 Saturday Project
 - [ ] **Mixed Precision Training Benchmark**
@@ -2526,68 +2216,15 @@ Each week's Saturday morning (or Friday evening — your choice) you spend **1.5
 - [ ] Benchmarks: MMLU, HellaSwag, ARC
 - [ ] **Code:** Add comprehensive training logging, evaluate with lm-evaluation-harness
 
-### 🔧 Day 6 — Silicon: Register Files + Multi-Port Memory (M3 Project C — Part 1)
-> **Connection to LLM track:** Today's LLM track is **NCCL, AllReduce, distributed training** — multi-rank coordination. Day 6 builds the silicon analogue: a **multi-port register file**, the smallest most-coordinated memory in any CPU. RV32I needs 2 simultaneous reads + 1 write per cycle to execute `add x1, x2, x3` in one cycle — exactly the parallelism problem at micro-scale.
-
-**The register file in a CPU:**
-- [ ] RV32I has **32 general-purpose registers**, each 32 bits → register file is `32 × 32 bits = 1024 bits` = ~125 bytes total
-- [ ] Each cycle the CPU may need: **read 2 registers** (rs1, rs2) + **write 1 register** (rd) → **3 ports active simultaneously**
-- [ ] Register `x0` is hard-wired to zero in RV32I — special case in your decoder
-- [ ] Register file lives inside the SM in a GPU too (each SM has ~256 KB of registers across all warps) — same concept, just bigger
-
-**Multi-port memory implementations:**
-- [ ] **Naive (with FFs)**: 32 × 32 = 1024 D flip-flops + a 32-way mux per read port. Works at small scale, doesn't scale beyond a few KB. *Used for register files.*
-- [ ] **True dual-port SRAM**: physical SRAM cell with 2 access transistors per port → expensive (10T per bit) but allows true parallel access. *Used in some accelerators.*
-- [ ] **Banked SRAM with arbitration**: split memory into N banks, route requests; if 2 requests hit the same bank, one stalls. *This is exactly how GPU shared memory and L1 cache work — and why "bank conflicts" hurt performance.*
-
-**Designing a 2-read 1-write register file:**
-- [ ] **Storage**: 32 × 32-bit registers using D flip-flops (one DFF per bit per register = 1024 DFFs)
-- [ ] **Read ports** (combinational, 2 ports):
-  ```verilog
-  assign rs1_data = (rs1_addr == 5'd0) ? 32'd0 : regs[rs1_addr];
-  assign rs2_data = (rs2_addr == 5'd0) ? 32'd0 : regs[rs2_addr];
-  ```
-- [ ] **Write port** (sequential, 1 port):
-  ```verilog
-  always @(posedge clk) begin
-    if (we && rd_addr != 5'd0) regs[rd_addr] <= rd_data;
-  end
-  ```
-- [ ] **Bypass / write-then-read** (advanced — needed in pipelined CPUs but not single-cycle): if we're writing to address X this cycle and reading X this same cycle, return the new value. Implemented by an extra mux.
-
-**Why register file design matters at GPU scale:**
-- [ ] An H100 SM has **65,536 32-bit registers** (256 KB per SM, 132 SMs total). Each warp uses up to 255 registers per thread.
-- [ ] To feed 32 threads × 4 source operands per instruction → register file needs **4 read ports per warp + 1 write port** at full throughput. NVIDIA achieves this with a heavily banked register file with conflict-aware allocation.
-- [ ] The `register pressure` Nsight metric is direct: "your kernel uses 96 regs/thread, only 21 warps fit per SM" → fewer warps to hide latency. **This is silicon banking pushed up to the software layer.**
-
-**Building blocks you already have for this:**
-- [ ] D flip-flops from W5 (the storage)
-- [ ] Decoders from W3 (the address-decode logic)
-- [ ] MUXes from W3 (the read-port output selection)
-- [ ] Counter from W5 (you don't need it here, but it's there)
-
-**🔨 Mini-project — M3 Project C, Part 1 (uses ONLY W3-W8 content):**
-- [ ] **`regfile.v`** — RV32I-compatible 32×32 register file:
-  ```verilog
-  module regfile(
-    input clk, input rst,
-    input [4:0] rs1_addr, output [31:0] rs1_data,
-    input [4:0] rs2_addr, output [31:0] rs2_data,
-    input [4:0] rd_addr,  input  [31:0] rd_data, input we
-  );
-    reg [31:0] regs[31:0];
-    integer i;
-    always @(posedge clk) begin
-      if (rst) for (i=0;i<32;i=i+1) regs[i] <= 32'd0;
-      else if (we && rd_addr != 5'd0) regs[rd_addr] <= rd_data;
-    end
-    assign rs1_data = (rs1_addr == 5'd0) ? 32'd0 : regs[rs1_addr];
-    assign rs2_data = (rs2_addr == 5'd0) ? 32'd0 : regs[rs2_addr];
-  endmodule
-  ```
-- [ ] **Testbench** that verifies: (1) read port returns 0 for `x0` even after a write, (2) write-then-read in same cycle returns OLD value (no bypass — this is correct for single-cycle CPUs), (3) reset zeros everything, (4) 100 random write+read sequences match Python reference
-- [ ] **Run Yosys synthesis** — count cells. Expect ~1024 DFFs + decoding logic. This is your first "big" design.
-- [ ] **Engineering journal (3 sentences):** "Bank conflicts in GPU shared memory are the same problem as port conflicts in my register file. The reason CUDA's `__syncthreads()` exists is to prevent two threads from racing the same bank. The reason GPU register pressure metrics exist is the silicon has finite ports and finite banks."
+### 🔧 Day 6 — Silicon: Multi-Port Register File (M3 Project C — Part 1)
+> **LLM ↔ Silicon link:** GPU shared-memory bank conflicts are the same physical problem as register-file port conflicts; "register pressure" in Nsight is just port-and-bank counts pushed to the software layer.
+- [ ] RV32I needs 2 reads (rs1, rs2) + 1 write (rd) per cycle → 3 simultaneous ports; `x0` is hard-wired to zero
+- [ ] Naive multi-port: 1024 DFFs + 32-way mux per read port (used for CPU regfiles, not for KB-scale memories)
+- [ ] True dual-port SRAM: 10T per bit; banked SRAM with arbitration: cheaper but bank conflicts stall (GPU shared memory)
+- [ ] H100 SM has 65,536 32-bit registers (256 KB) per SM, banked → register pressure = how many warps fit per SM
+- [ ] Bypass / write-then-read: needed in pipelined CPUs (W17+) but NOT in single-cycle (W9 design)
+- [ ] Reuses: W5 DFFs (storage), W3 decoders (address decode), W3 muxes (read-port output)
+- [ ] **Code:** `regfile.v` — 32×32 RV32I-compatible register file (2 read ports combinational, 1 write port sequential, x0 hard-zero, sync reset); testbench verifies x0-stays-zero, write-then-same-cycle-read returns OLD value (no bypass), 100 random write+read sequences vs Python reference; run Yosys → confirm ~1024 DFFs + decode logic
 
 ### 🔨 Saturday Project
 - [ ] **Distributed GPT Training Pipeline**
@@ -2637,72 +2274,17 @@ Each week's Saturday morning (or Friday evening — your choice) you spend **1.5
 - [ ] MT-Bench, AlpacaEval evaluation
 - [ ] **Code:** Build chat interface for fine-tuned model with proper templates
 
-### 🔧 Day 6 — Silicon: ALU Operations + Shifters + Comparators (M3 Project C — Part 2)
-> **Connection to LLM track:** Today's LLM track is **custom CUDA extensions** — extending PyTorch with a new operator. The silicon analogue is **extending an ISA with a new instruction**, which means extending the ALU. Today you build the full RV32I integer ALU: the brain of every CPU and the silicon ancestor of every CUDA core.
-
-**The ALU's job:**
-- [ ] An ALU = Arithmetic Logic Unit. Takes 2 operands + an opcode, returns a result + flags.
-- [ ] In RV32I, the ALU operations are: `ADD, SUB, AND, OR, XOR, SLL, SRL, SRA, SLT, SLTU` (10 ops, 4-bit opcode field). All take 2 × 32-bit operands and return 1 × 32-bit result.
-- [ ] In a GPU, each CUDA core's "INT32 unit" is essentially this ALU replicated 32× per warp.
-
-**Op-by-op silicon:**
-- [ ] **ADD/SUB**: reuse your W4 `ripple_adder`/`add_sub`. Decode `op == SUB` as a control to invert B and force `Cin = 1` (two's complement).
-- [ ] **AND**: 32 parallel AND gates (`assign result = a & b;`)
-- [ ] **OR**: 32 parallel OR gates (`assign result = a | b;`)
-- [ ] **XOR**: 32 parallel XOR gates (`assign result = a ^ b;`)
-- [ ] These three are *trivial* in silicon (no carry chain → no critical path issue). They're "free" compared to ADD.
-
-**Shifters — the interesting case:**
-- [ ] **SLL** (Shift Left Logical): `a << b` → fill with zeros from the right
-- [ ] **SRL** (Shift Right Logical): `a >> b` → fill with zeros from the left
-- [ ] **SRA** (Shift Right Arithmetic): `a >>> b` → fill with sign bit (preserves sign for two's-complement division-by-power-of-2)
-- [ ] Two implementation choices:
-  - **Counter shifter (multi-cycle)**: a 1-bit shifter that runs `b` times. Tiny area, but multi-cycle latency.
-  - **Barrel shifter (single-cycle)**: log₂(N) layers of muxes — each layer shifts by a fixed power of 2 conditional on a bit of `b`. For N=32: 5 layers, 32 muxes per layer = 160 muxes. Larger area, single-cycle.
-- [ ] Modern CPUs use **barrel shifters** (single-cycle is mandatory for ISA-level shift instructions).
-- [ ] Verilog tip: the synthesizer turns `assign result = a << b;` into a barrel shifter automatically — but knowing what's underneath helps you reason about timing.
-
-**Comparators — SLT/SLTU and branch decisions:**
-- [ ] **SLTU** (Set if Less Than Unsigned): returns 1 if `a < b` (unsigned), else 0. Implemented as `subtract a-b`, return the borrow-out.
-- [ ] **SLT** (Set if Less Than Signed): same but interpret as two's complement. Trick: signed comparison = unsigned comparison after flipping both sign bits.
-- [ ] **Equality** (used by BEQ/BNE branches): `a == b` ⇔ `~|(a^b)` (XOR all bits, OR them, invert).
-- [ ] These flags also feed branch unit (next month's work).
-
-**ALU control unit:**
-- [ ] Decoder converts opcode bits → 1-hot or binary control to select the result mux
-- [ ] All ALU ops run in parallel; control selects which output to use:
-  ```verilog
-  always @(*) begin
-    case (alu_op)
-      4'h0: result = a + b;       // ADD
-      4'h1: result = a - b;       // SUB
-      4'h2: result = a & b;       // AND
-      4'h3: result = a | b;       // OR
-      4'h4: result = a ^ b;       // XOR
-      4'h5: result = a << b[4:0]; // SLL
-      4'h6: result = a >> b[4:0]; // SRL
-      4'h7: result = $signed(a) >>> b[4:0]; // SRA
-      4'h8: result = ($signed(a) < $signed(b)) ? 32'd1 : 32'd0; // SLT
-      4'h9: result = (a < b)                   ? 32'd1 : 32'd0; // SLTU
-      default: result = 32'd0;
-    endcase
-  end
-  ```
-- [ ] Note `b[4:0]` — RV32I shifts are by 0-31, so only the bottom 5 bits of `b` matter.
-
-**Critical path of the ALU:**
-- [ ] Longest path = adder/subtractor (32-bit ripple = 32 gates ≈ 3-6 ns at Sky130 130nm)
-- [ ] Comparator (SLT/SLTU) uses the same adder, so it's the same path
-- [ ] Shifter is fast (5 mux layers ≈ 1-2 ns)
-- [ ] Logical ops are 1 gate delay
-- [ ] **Conclusion**: the adder dominates ALU timing → upgrading from ripple to CLA is the primary speedup. Real CPUs use Kogge-Stone or Han-Carlson adders.
-
-**🔨 Mini-project — M3 Project C, Part 2 (uses W4 adder + W9 regfile + new ALU logic):**
-- [ ] **`alu.v`** — full RV32I integer ALU with all 10 ops above, parameterized to width N (default 32). Reuses your W4 `add_sub.v` for ADD/SUB; everything else can use Verilog operators initially.
-- [ ] **Testbench**: 1000 random `(a, b, op)` tuples, computed against a Python reference (Python: `a+b`, `a-b`, `a&b`, `a|b`, `a^b`, `(a<<(b&31))&0xFFFFFFFF`, `a>>(b&31)`, etc., with two's-complement handling). Print pass/fail. Aim for 100% pass.
-- [ ] **Build a barrel shifter manually** (`barrel_shift.v`) instead of using `<<` — 5 stages of muxes. Verify it matches the synthesizer-generated version. Run Yosys → see what cells it picks.
-- [ ] **Run Yosys synthesis on `alu.v`** with the Sky130 PDK. Report total gate count, critical path delay, area. Compare with last week's `regfile.v` synthesis numbers — which is bigger? Which is faster?
-- [ ] **Engineering journal (3 sentences):** "When CUDA executes `INT32` add across 32 threads of a warp, that's 32 parallel copies of my 32-bit ALU running on the SM. The reason `int` and `float` ops have different throughput is they live in *different ALUs* on the silicon. The reason `__shfl` exists is that ALUs can read each other's results without going through the register file."
+### 🔧 Day 6 — Silicon: RV32I ALU — All 10 Operations (M3 Project C — Part 2)
+> **LLM ↔ Silicon link:** custom CUDA extensions extend PyTorch with new ops; today you extend a CPU with a full ALU — the silicon ancestor of every CUDA core's INT32 unit.
+- [ ] RV32I ALU ops (10): ADD, SUB, AND, OR, XOR, SLL, SRL, SRA, SLT, SLTU
+- [ ] ADD/SUB: reuse W4 `add_sub.v` (invert B + Cin=1 for SUB); AND/OR/XOR: 32 parallel gates each (1 gate delay, "free")
+- [ ] Shifters: counter shifter (multi-cycle, tiny area) vs barrel shifter (single-cycle, log₂(N)=5 mux layers for N=32, ~160 muxes); modern CPUs use barrel
+- [ ] SRA = arithmetic right shift, fills with sign bit (preserves signed division by powers of 2); SLL/SRL fill with zeros
+- [ ] SLT (signed) / SLTU (unsigned): subtract + look at borrow-out / sign bit; equality `a==b` = `~|(a^b)` (used by branch unit)
+- [ ] Shift amount is `b[4:0]` only (RV32I shifts are 0-31)
+- [ ] ALU control: case statement on 4-bit `alu_op`; all ops run in parallel, MUX selects result
+- [ ] Critical path: 32-bit adder (~3-6 ns at Sky130 130nm) — upgrading ripple→CLA is the main speedup; shifter and logicals are far faster
+- [ ] **Code:** `alu.v` (parameterized width N, reuses W4 `add_sub.v` for ADD/SUB, Verilog ops for the rest); manual `barrel_shift.v` with 5 mux layers; testbench drives 1000 random `(a, b, op)` tuples vs Python reference; run Yosys on Sky130 → compare gate count and Fmax against W9 regfile
 
 ### 🔨 Saturday Project
 - [ ] **Complete LLM Fine-Tuning Pipeline**
@@ -2750,93 +2332,15 @@ Each week's Saturday morning (or Friday evening — your choice) you spend **1.5
 - [ ] **Code:** Implement double-buffered GEMM kernel
 
 ### 🔧 Day 6 — Silicon: ALU + RegFile Integration + Memory-Mapped IO (M3 Project C — Part 3)
-> **Connection to LLM track:** Today's LLM track is **Flash Attention + Triton** — software that talks to GPU compute via memory-mapped registers and command buffers. Day 6 builds the silicon analogue of that interface: a **memory-mapped block** with addressable registers that a host (eventually a CPU) writes to kick off compute. After today, you understand exactly how `cudaMemcpy` and a kernel launch *physically* talk to a GPU.
-
-**Memory-mapped IO (MMIO) — the universal interface:**
-- [ ] Every accelerator (GPU, FPGA AI block, NIC) exposes a set of **registers** at known addresses
-- [ ] The CPU communicates by writing/reading those addresses (CPU thinks it's writing memory, but the address actually goes to the accelerator's control logic)
-- [ ] Common register categories:
-  - **Control register** (CR): bits to start/stop/reset compute (e.g., bit 0 = "go")
-  - **Status register** (SR): bits the device sets to indicate done/error/busy
-  - **Data registers**: where operands or pointers live
-  - **Interrupt-enable register** (IER): which conditions raise an interrupt to the CPU
-- [ ] This is *exactly* how a CUDA kernel launch works: the driver writes a command to a memory-mapped GPU command queue, the GPU sees it and starts executing.
-
-**Bus protocols — handshake fundamentals:**
-- [ ] **Synchronous + always-valid** (simple): every cycle data is valid; no handshake. Used for pure datapaths.
-- [ ] **Valid/Ready (AXI-style)** (most common): producer asserts `VALID` when data is ready; consumer asserts `READY` when it can accept. Transfer happens on the cycle when both are high.
-  ```
-  cycle:    1 2 3 4 5 6 7
-  VALID:    0 1 1 1 0 1 1
-  READY:    1 1 0 1 1 0 1
-  XFER?:    .  ✓ .  ✓  .  .  ✓
-  ```
-- [ ] **Backpressure**: if consumer can't keep up, it deasserts `READY` → producer waits. This propagates upstream in pipelines.
-- [ ] **Why this matters for AI**: vLLM's PagedAttention is a software pattern with the same shape — produce KV pages when ready, consume when GPU has memory.
-
-**A minimal memory-mapped ALU block:**
-- [ ] Decode address: `addr[7:0]` selects which register the CPU is hitting
-  - `0x00` → operand A (32-bit, write)
-  - `0x04` → operand B (32-bit, write)
-  - `0x08` → opcode (4-bit, write)
-  - `0x0C` → control (write 1 to start)
-  - `0x10` → status (read; bit 0 = done)
-  - `0x14` → result (32-bit, read)
-- [ ] Address decoder: 6 1-hot register-select signals from 5-bit address
-- [ ] Each register is a DFF bank guarded by `(addr_match && we)`
-- [ ] FSM: `IDLE → COMPUTE → DONE → IDLE` (1-cycle compute since ALU is purely combinational)
-
-**Why this design pattern is universal:**
-- [ ] The same skeleton (CSRs + Control + Status + Data) is used by **every accelerator**: NVDLA, Google Edge TPU, Apple Neural Engine, Cerebras, your future Magnum Opus chip
-- [ ] Production CPUs ↔ accelerators use richer protocols (AXI4-Full, PCIe, NVLink, UCIe), but always with this CSR core
-- [ ] You're going to extend this to AXI-Lite in M5 (Week 16-17 Day 6), then AXI4-Full in M13
-
-**🔨 Mini-project — M3 Project C, Part 3 (uses ONLY W3-W10 content + Day 6 W11 simple bus):**
-- [ ] **`alu_mmio.v`** — wrap your W10 `alu.v` in a memory-mapped slave interface:
-  ```verilog
-  module alu_mmio(
-    input clk, input rst,
-    // simple write port (host → device)
-    input wr_en, input [4:0] wr_addr, input [31:0] wr_data,
-    // simple read port (device → host)
-    input  [4:0] rd_addr, output [31:0] rd_data,
-    // status
-    output done, output busy
-  );
-    reg [31:0] reg_a, reg_b, reg_result;
-    reg [3:0]  reg_op;
-    reg        reg_start, reg_done;
-    wire [31:0] alu_out;
-    alu u_alu(.a(reg_a), .b(reg_b), .op(reg_op), .y(alu_out));
-    always @(posedge clk) begin
-      if (rst) begin
-        reg_a <= 0; reg_b <= 0; reg_op <= 0;
-        reg_start <= 0; reg_done <= 0; reg_result <= 0;
-      end else begin
-        if (wr_en) begin
-          case (wr_addr)
-            5'h00: reg_a <= wr_data;
-            5'h01: reg_b <= wr_data;
-            5'h02: reg_op <= wr_data[3:0];
-            5'h03: reg_start <= wr_data[0];
-          endcase
-        end
-        if (reg_start) begin
-          reg_result <= alu_out;
-          reg_done   <= 1;
-          reg_start  <= 0;
-        end
-        // host clears done by writing to reg_status (omitted for brevity)
-      end
-    end
-    assign rd_data = (rd_addr == 5'h04) ? {31'd0, reg_done} :
-                     (rd_addr == 5'h05) ? reg_result : 32'd0;
-    assign done = reg_done; assign busy = reg_start;
-  endmodule
-  ```
-- [ ] **Integrate with W9 RegFile**: write a tiny "test driver" module that uses your `alu_mmio` to sequentially compute `R1 = R2 + R3, R4 = R1 ^ R2, ...` — this is your first taste of how a CPU's instruction loop will work next month.
-- [ ] **Testbench**: drive the MMIO interface like a software CPU would. Verify each instruction's result against a Python reference. Run a sequence of 50 random ops.
-- [ ] **Engineering journal (3 sentences):** "Every CUDA kernel launch is a CPU writing to a memory-mapped GPU command queue. My `alu_mmio` is the simplest version of that. The reason CUDA's stream API exists is to overlap multiple memory-mapped commands without waiting for each `done` signal."
+> **LLM ↔ Silicon link:** every CUDA kernel launch is a CPU writing to a memory-mapped GPU command queue; today you build the simplest version of that interface.
+- [ ] MMIO = registers at fixed addresses; CPU "writes memory" but the address routes to accelerator control logic
+- [ ] Standard CSR categories: Control (start/stop), Status (done/error/busy), Data (operands/pointers), Interrupt-Enable
+- [ ] Valid/Ready handshake: transfer happens on cycle when both VALID and READY high; backpressure propagates upstream
+- [ ] vLLM's PagedAttention is the software shape of the same pattern (produce KV pages, consume when ready)
+- [ ] Address decoder: `addr` → 1-hot register-select; each register = DFF bank guarded by `(addr_match && we)`
+- [ ] Tiny FSM around combinational ALU: `IDLE → COMPUTE → DONE` (1 cycle compute since ALU is comb)
+- [ ] Same skeleton (CSR + Control + Status + Data) is used by NVDLA, Edge TPU, Cerebras, Apple Neural Engine, your future Magnum Opus
+- [ ] **Code:** `alu_mmio.v` — wrap W10 `alu.v` in a slave: write reg_a (0x00), reg_b (0x04), opcode (0x08), start (0x0C); read status (0x10), result (0x14); FSM clears `done` on next start; small driver module sequences instructions like a tiny CPU; testbench drives 50 random ops vs Python reference
 
 ### 🔨 Saturday Project
 - [ ] **Triton Kernel Library**
@@ -2889,72 +2393,15 @@ Each week's Saturday morning (or Friday evening — your choice) you spend **1.5
 - [ ] Identify weak areas for extra study
 - [ ] **Code:** Revisit and optimize your best project
 
-### 🔧 Day 6 — Silicon: Phase-1 Cap — M3 Project C SHIPS + Foreshadow Month 4 (multi-precision MAC)
-> **Connection to LLM track:** Today's LLM track is **tokenizer mastery + multi-modal overview** — wrapping up Phase 1's LLM foundations. On the silicon side, today is the **Phase 1 silicon cap**: ship M3 Project C (ALU + RegFile), run the full Yosys + OpenSTA flow on it, and foreshadow next month's INT4/INT8 MAC unit (the silicon counterpart of the upcoming LoRA + quantization weeks).
-
-**What you've built across Phase 1 silicon (Weeks 3-12) — pause and appreciate:**
-- [ ] **Combinational** (W3-W4): MUX, decoder, encoder, half/full/ripple adder, subtractor, comparator
-- [ ] **Sequential** (W5): D flip-flop, counter, shift register, FSM (traffic light), shift-add multiplier
-- [ ] **Arithmetic** (W6): array multiplier, MAC unit (unsigned, signed, saturating, pipelined)
-- [ ] **Timing** (W7): hand-computed setup/hold slack, pipelined a MAC for higher frequency
-- [ ] **Memory** (W8): 6T SRAM and 1T1C DRAM understood; first Yosys+OpenSTA on Sky130 with M2 Project C
-- [ ] **CPU primitives** (W9-W11): 32×32 register file, 32-bit RV32I ALU (10 ops), memory-mapped wrapper
-
-**What you have NOT built yet (and that's the right pace):**
-- A program counter + instruction memory (Month 6 = single-cycle CPU)
-- A control unit driving the ALU from RV32I instructions (Month 6)
-- Real AXI-Lite (Month 5)
-- Real FIFOs (Month 5)
-- A complete CPU running C code (Month 6)
-
-**Today's plan: ship M3 Project C, then plant the seeds for M4.**
-
-**Yosys + OpenSTA on the full M3 Project C:**
-- [ ] Combine `regfile.v` (W9) + `alu.v` (W10) + `alu_mmio.v` (W11) into a top-level `m3_top.v` for synthesis
-- [ ] **Yosys flow**:
-  ```
-  read_verilog regfile.v alu.v alu_mmio.v m3_top.v
-  hierarchy -top m3_top
-  proc; opt; fsm; opt; memory; opt
-  techmap; opt
-  dfflibmap -liberty sky130_fd_sc_hd__tt_025C_1v80.lib
-  abc -liberty sky130_fd_sc_hd__tt_025C_1v80.lib
-  stat
-  write_verilog m3_top_synth.v
-  ```
-- [ ] **Yosys stats**: total cells, area in µm², breakdown by cell type. Expect ~3000-5000 standard cells for the combined design.
-- [ ] **OpenSTA**:
-  ```
-  read_liberty sky130_fd_sc_hd__tt_025C_1v80.lib
-  read_verilog m3_top_synth.v
-  link_design m3_top
-  read_sdc m3_top.sdc       # contains: create_clock -period 5 [get_ports clk]
-  report_checks -path_delay max -fields {capacitance slew} -group_count 5
-  ```
-- [ ] **Push the clock period until it fails**: start at 5 ns (200 MHz), step down 0.5 ns at a time. Where does WNS first go negative? That's your design's `Fmax` on Sky130. Document it.
-- [ ] **Compare with the M2 MAC unit's Fmax** from W8 — which is faster? Why? (Likely the MAC, because the ALU's barrel shifter and 32-bit adder dominate timing.)
-
-**Foreshadowing Month 4 — multi-precision MAC (the LLM-quantization counterpart):**
-- [ ] Next month's LLM topic is **LoRA + quantization (GPTQ/AWQ/INT4/INT8/FP8)**. Software side: smaller weights → faster inference.
-- [ ] Hardware side: a fast INT4 model is *useless* unless the silicon can multiply INT4 inputs at INT4 cost (not zero-pad to INT8 and waste). You need a MAC unit whose width is **runtime-configurable**.
-- [ ] Preview: M4 Project C builds a **single MAC** that can switch between INT4×INT4 → INT8 accumulator and INT8×INT8 → INT16 accumulator, with packed-byte storage (two INT4s per byte).
-- [ ] Today's Day 6 closing exercise: in 30 minutes, sketch (just on paper) what changes in your W6 `mac_signed.v` to support runtime-switchable precision. What new control input do you need? What changes in the multiplier? What stays the same?
-
-**🔨 Mini-project — Phase 1 Silicon Cap (uses ONLY W3-W11 content):**
-- [ ] **Ship M3 Project C** to `silicon/month03_alu_regfile/`:
-  - All Verilog sources (regfile, alu, alu_mmio, top, testbench)
-  - Yosys synthesis script + the resulting netlist
-  - OpenSTA SDC + the timing report
-  - **README.md** explaining the design, the Yosys/STA results, and the Fmax you achieved
-- [ ] **Phase 1 silicon retrospective** (`silicon/PHASE1_RETRO.md`):
-  - What you built (list every module from W3-W11)
-  - What broke and how you fixed it (1-2 specific bug stories)
-  - Yosys + OpenSTA numbers for both Project C builds (M2 MAC + M3 ALU/RegFile)
-  - What you couldn't do yet (a CPU that runs C — coming Month 6)
-  - **One paragraph mapping each silicon primitive to its CUDA/LLM analogue**
-- [ ] **Engineering journal (4 sentences):** "I have built every primitive a CPU needs except the program counter and the control unit. Next month I'll add multi-precision so my MAC can run at INT4. Three months from now I'll combine all of these into a working CPU on FPGA. The journey from gates to a CPU running C is now physically clear in my head, and every CUDA primitive I learn from now on has a silicon counterpart I can name."
-
-**Optional — peek ahead (bedtime reading only):** RV32I ISA spec Sections 2.1-2.4 (the integer instruction encoding) — Month 6 needs it, but reading it now will make Month 4-5 silicon-side feel even more grounded.
+### 🔧 Day 6 — Silicon: Phase 1 Cap — M3 Project C SHIPS + Foreshadow Month 4
+> **LLM ↔ Silicon link:** Phase 1 LLM ends with tokenizer + multi-modal overview; Phase 1 silicon ends with every CPU primitive built (regfile, ALU, MMIO) — only PC + control unit + memory left for Month 6's full CPU.
+- [ ] Phase 1 silicon you've built: gates+MUX+decoder (W3) → adders+subtractor (W4) → DFFs+counter+FSM+multiplier (W5) → MAC variants (W6) → STA + pipelined MAC (W7) → SRAM/DRAM physics + Yosys/OpenSTA on Sky130 (W8) → register file (W9) → 10-op RV32I ALU (W10) → MMIO wrapper (W11)
+- [ ] What's NOT built yet (correct pace): program counter, instruction memory, control unit driving ALU from opcodes (Month 6), real AXI-Lite + FIFOs (Month 5), full CPU running C (Month 6)
+- [ ] Combine `regfile.v + alu.v + alu_mmio.v` into top `m3_top.v`; Yosys flow: `read_verilog → hierarchy → proc; opt; fsm; opt; memory; opt → techmap; opt → dfflibmap -liberty sky130.lib → abc -liberty sky130.lib → stat → write_verilog`
+- [ ] OpenSTA: `read_liberty + read_verilog (synth netlist) + link_design + read_sdc + report_checks`; expect ~3000-5000 standard cells, push period from 5 ns down until WNS goes negative → record Fmax
+- [ ] Foreshadow M4: LLM track does LoRA + quantization (GPTQ/AWQ/INT4/INT8/FP8); silicon side needs a MAC whose **width is runtime-switchable** (INT4×INT4 → INT8 accum, or INT8×INT8 → INT16 accum) with packed-byte storage
+- [ ] Pen-and-paper exercise: sketch what changes in W6 `mac_signed.v` for runtime-switchable precision (new control input? what changes in the multiplier? what stays the same?)
+- [ ] **Code (Project C M3 SHIPS):** ship `silicon/month03_alu_regfile/` with all sources + Yosys script + OpenSTA SDC + timing report + README documenting Fmax; write `silicon/PHASE1_RETRO.md` listing every module W3-W11 with the LLM/CUDA analogue for each
 
 ### 🔨 Saturday Project
 - [ ] **Phase 1 Capstone: Mini LLM from Scratch**
