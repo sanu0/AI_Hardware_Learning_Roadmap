@@ -1,9 +1,133 @@
+<a id="toc"></a>
+
 # LLM + CUDA + Hardware Mastery Roadmap
 
 > **Daily: 2-3 hours** | **Saturday: 3-4 hrs project** | **Sunday: 1-2 hrs papers (optional)**
 > **Duration:** ~18-24 months | **6-month milestone:** serious systems projects + strong LLM/GPU fundamentals
 > **After each month:** 1 week revision buffer to revisit weak areas + complete monthly projects
 > **Projects:** 1 weekly project + **2 monthly projects** (novel, cumulative, useful to other people)
+
+---
+
+## 📑 Table of Contents
+
+### 🎯 Getting Started
+- [North Star](#north-star)
+- [How To Use This File](#how-to-use-this-file)
+- [Project Philosophy: Novel + Useful + Cumulative](#project-philosophy-novel--useful--cumulative)
+- [Progress Overview](#progress-overview)
+
+### 🏆 Monthly Capstone Project Catalog
+- [Month 1 — GPU Matrix Math Engine + LLM Inference Cost Simulator](#month-1-project-gpu-matrix-math-engine)
+- [Month 2 — nanoLLM + TransformerScope](#month-2-project-a-nanollm--your-own-gpt-from-scratch)
+- [Month 3 — LLM Surgery + TokenScope](#month-3-project-a-llm-surgery--fine-tuning--alignment-toolkit)
+- [Month 4 — QuantBench + LLM-Speedometer](#month-4-project-a-quantbench--the-quantization-analyzer)
+- [Month 5 — DeepRAG + RAGTrace](#month-5-project-a-deeprag--production-rag-with-nvidia-stack)
+- [Month 6 — AgentForge ⭐ + EvalArena](#month-6-project-a-agentforge--reasoning-agent-platform--milestone-project)
+- [Month 7 — IncidentLens + GPU PDF Intelligence](#month-7-project-a-incidentlens--multimodal-ai-debugging-assistant)
+- [Month 8 — MoE-Lab + ArchSearch](#month-8-project-a-moe-lab--mixture-of-experts-playground)
+- [Month 9 — KernelSmith + FusionLab](#month-9-project-a-kernelsmith--custom-triton-kernel-library-for-llms)
+- [Month 10 — TrainScale + TrainWatch](#month-10-project-a-trainscale--distributed-llm-training-framework)
+- [Month 11 — PaperBot + Paper2Benchmark](#month-11-project-a-paperbot--ai-research-paper-implementer)
+- [Month 12 — ReasonEngine + ThinkTrace](#month-12-project-a-reasonengine--test-time-compute-for-better-answers)
+- [Month 13 — NVServe + CostGuard](#month-13-project-a-nvserve--production-llm-serving-platform)
+- [Month 14 — SynthData + DataScope](#month-14-project-a-synthdata--gpu-accelerated-synthetic-data-factory)
+- [Month 15 — AgentX + AgentEval](#month-15-project-a-agentx--enterprise-ai-agent-with-full-nvidia-stack)
+- [Month 16 — OpenContrib (Open Source)](#month-16-project-a-opencontrib--major-open-source-contribution)
+- [Month 17-18 — Magnum Opus ⭐⭐](#month-17-18-project-magnum-opus--your-signature-project)
+- [Monthly Project Tracker (overview table)](#monthly-project-tracker-2-projects-per-month)
+
+### 📅 Month-by-Month Focus & Capabilities
+- [Month 1 — GPU + CUDA + NN Basics](#month-1--gpu-architecture--cuda-fundamentals--neural-network-basics)
+- [Month 2 — Transformers + GPT + Profiling](#month-2--transformers--gpt-from-scratch--gpu-libraries--profiling)
+- [Month 3 — Distributed + SFT/DPO + Flash Attention + Triton](#month-3--distributed-training--fine-tuning--flash-attention--triton)
+- [Month 4 — PEFT + Quantization](#month-4--parameter-efficient-fine-tuning--quantization)
+- [Month 5 — Inference Serving + RAG + Agents + NVIDIA](#month-5--inference-serving--rag--agents--nvidia-ecosystem)
+- [Month 6 — Distillation + RLHF + Reasoning + Long Context ⭐](#month-6--distillation--rlhf--reasoning--long-context--6-month-milestone)
+- [Month 7 — Multi-Modal + Diffusion](#month-7--multi-modal-ai--diffusion-overview)
+- [Month 8 — MoE + Advanced Architectures](#month-8--mixture-of-experts--advanced-architectures)
+- [Month 9 — Kernel Engineering + Compilers](#month-9--advanced-kernel-engineering--compiler-optimization)
+- [Month 10 — Distributed at Scale + Production](#month-10--distributed-training-at-scale--production-systems)
+- [Month 11 — Paper Implementation + Data Engineering](#month-11--research-paper-implementation--data-engineering)
+- [Month 12 — Test-Time Compute + Reasoning + RL](#month-12--test-time-compute--reasoning--rl-for-llms)
+- [Month 13 — Production Serving + Alignment + Enterprise Agents](#month-13--production-llm-serving--advanced-alignment--enterprise-agents)
+- [Month 14 — Synthetic Data + Advanced RAG](#month-14--synthetic-data-engineering--advanced-rag)
+- [Month 15 — Enterprise AI Agents (NVIDIA)](#month-15--enterprise-ai-agents-full-nvidia-stack)
+- [Month 16 — Open-Source Contributions](#month-16--open-source-contributions)
+- [Months 17-18 — Magnum Opus](#months-17-18--magnum-opus-your-signature-project)
+
+### 🛠 Phase 1: Foundations (Weeks 1-12, Months 1-3)
+- [Week 1 — CPU vs GPU & Math Foundations ✅](#week-1-cpu-vs-gpu--math-foundations--completed)
+- [Week 2 — CUDA Memory & Backpropagation](#week-2--cuda-memory--backpropagation)
+- [Week 3 — Warp Execution & Training Neural Networks](#week-3--warp-execution--training-neural-networks)
+- [Week 4 — CUDA Streams & Sequence Models](#week-4--cuda-streams--sequence-models)
+- [🔄 Buffer Week (Month 1 Revision)](#-buffer-week-month-1-revision)
+- [Week 5 — Transformer: Attention Is All You Need](#week-5--the-transformer--attention-is-all-you-need)
+- [Week 6 — cuBLAS, cuDNN, Tensor Cores](#week-6--cublas-cudnn-tensor-cores)
+- [Week 7 — Profiling & Modern LLM Architectures](#week-7--profiling--modern-llm-architectures)
+- [Week 8 — GPU Memory Deep Dive & Data Pipelines](#week-8--gpu-memory-deep-dive--data-pipelines)
+- [🔄 Buffer Week (Month 2 Revision)](#-buffer-week-month-2-revision)
+- [Week 9 — Distributed CUDA & Pre-training](#week-9--distributed-cuda--pre-training-concepts)
+- [Week 10 — Custom CUDA + Instruction Following](#week-10--custom-cuda-for-pytorch--instruction-following)
+- [Week 11 — Flash Attention & Triton](#week-11--flash-attention--triton)
+- [Week 12 — Tokenizer Mastery & Multi-Modal Overview](#week-12--tokenizer-mastery--multi-modal-overview)
+- [✅ Phase 1 Completion Checklist](#-phase-1-completion-checklist)
+
+### 🚀 Phase 2: Intermediate (Weeks 13-26, Months 4-6)
+- [🔄 Buffer Week (Month 3 Revision)](#-buffer-week-month-3-revision)
+- [Week 13 — LoRA & PEFT](#week-13--lora--parameter-efficient-fine-tuning)
+- [Week 14 — Quantization Deep Dive](#week-14--quantization-deep-dive)
+- [Week 15 — Inference Serving](#week-15--inference-serving)
+- [Week 16 — RAG Foundations](#week-16--rag-foundations)
+- [🔄 Buffer Week (Month 4 Revision)](#-buffer-week-month-4-revision)
+- [Week 17 — Advanced RAG](#week-17--advanced-rag)
+- [Week 18 — AI Agents Foundations](#week-18--ai-agents--foundations)
+- [Week 19 — AI Agents Advanced](#week-19--ai-agents--advanced)
+- [Week 20 — NVIDIA AI Ecosystem Pt 1](#week-20--nvidia-ai-ecosystem--part-1)
+- [Week 20.5 — NVIDIA AI Ecosystem Pt 2](#week-205--nvidia-ai-ecosystem--part-2)
+- [🔄 Buffer Week (Month 5 Revision)](#-buffer-week-month-5-revision)
+- [Week 21-22 — Distillation & Model Merging](#week-21-22--knowledge-distillation--model-merging)
+- [Week 23-24 — RL, RLHF & Reasoning](#week-23-24--rl-foundations-rlhf--reasoning)
+- [Week 25-26 — Long Context & Efficient Architectures](#week-25-26--long-context--efficient-architectures)
+- [✅ Phase 2 Completion Checklist (6-MONTH MILESTONE)](#-phase-2-completion-checklist-6-month-milestone)
+- [🔄 Buffer Week (Month 6 Revision) ⭐](#-buffer-week-month-6-revision--6-month-milestone)
+
+### ⚙ Phase 3: Advanced (Weeks 27-40, Months 7-10)
+- [Week 27-28 — Vision-Language & Multi-Modal AI](#week-27-28--vision-language--multi-modal-ai)
+- [Week 28.5 — Diffusion Models Overview](#week-285--diffusion-models--generative-ai-overview)
+- [Week 29-30 — MoE & Advanced Architectures](#week-29-30--moe--advanced-architectures)
+- [Week 31-32 — Compiler & Kernel Optimization](#week-31-32--compiler--kernel-optimization)
+- [Week 33-34 — Training Infrastructure](#week-33-34--training-infrastructure)
+- [Week 35-36 — Evaluation & Benchmarking](#week-35-36--evaluation--benchmarking)
+- [Week 37-38 — Production Systems](#week-37-38--production-systems)
+- [Week 39-40 — Synthetic Data & Structured Generation](#week-39-40--synthetic-data--structured-generation)
+- [✅ Phase 3 Completion Checklist](#-phase-3-completion-checklist)
+
+### 🎓 Phase 4: Expert (Weeks 41-52, Months 11-13)
+- [Week 41-42 — Reading & Implementing Papers](#week-41-42--reading--implementing-papers)
+- [Week 43-44 — Test-Time Compute & Reasoning Scaling](#week-43-44--test-time-compute--reasoning-scaling)
+- [Week 45-46 — Enterprise AI Agents with NVIDIA](#week-45-46--enterprise-ai-agents-with-nvidia)
+- [Week 47-48 — Advanced Fine-Tuning & Alignment](#week-47-48--advanced-fine-tuning--alignment)
+- [Week 49-50 — Advanced RAG & Information Retrieval](#week-49-50--advanced-rag--information-retrieval)
+- [Week 51-52 — Phase 4 Capstone](#week-51-52--phase-4-capstone)
+- [✅ Phase 4 Completion Checklist](#-phase-4-completion-checklist)
+
+### 🏅 Phase 5: Mastery (Weeks 53-65, Months 14-16)
+- [Week 53-56 — Capstone Project](#week-53-56--capstone-project)
+- [Week 57-60 — Cutting Edge Research](#week-57-60--cutting-edge-research)
+- [Week 61-65 — Open Source & Community](#week-61-65--open-source--community)
+
+### 🎖 Phase 6: Capstone & Portfolio (Weeks 66-78, Months 17-18)
+- [Week 66-72 — Second Capstone + Portfolio](#week-66-72-second-capstone--portfolio)
+- [Week 73-78 — Staying Current & Mastery](#week-73-78-staying-current--mastery)
+
+### 📦 Appendix: Essential Resources
+- [📚 Books](#books)
+- [🎓 Online Courses](#online-courses)
+- [💻 GitHub Repos to Study](#github-repos-to-study)
+- [📄 Master Reading List (38 Papers)](#master-reading-list-38-papers)
+- [⚙ Hardware Knowledge Checklist](#hardware-knowledge-checklist)
+- [🟢 NVIDIA AI Tools & Ecosystem Checklist](#nvidia-ai-tools--ecosystem-checklist)
 
 ---
 
@@ -1584,6 +1708,8 @@ Every monthly project README should include:
 - [ ] Understand FP32/FP16/BF16 and Tensor Cores
 - [ ] Can fine-tune models with SFT and DPO
 
+[⬆ Back to Table of Contents](#toc)
+
 ---
 
 # ═══════════════════════════════════════════════════
@@ -2174,6 +2300,8 @@ Every monthly project README should include:
 - [ ] Push both projects to GitHub
 - [ ] **Write a "6-month retrospective" blog post summarizing your journey**
 
+[⬆ Back to Table of Contents](#toc)
+
 ---
 
 # ═══════════════════════════════════════════════════
@@ -2419,6 +2547,8 @@ Every monthly project README should include:
 - [ ] Can build production LLM systems with MLOps
 - [ ] Can generate and curate synthetic training data
 
+[⬆ Back to Table of Contents](#toc)
+
 ---
 
 # ═══════════════════════════════════════════════════
@@ -2572,6 +2702,8 @@ Every monthly project README should include:
 - [ ] Can build state-of-the-art RAG systems
 - [ ] Have contributed to open-source AI projects
 
+[⬆ Back to Table of Contents](#toc)
+
 ---
 
 # ═══════════════════════════════════════════════════
@@ -2675,6 +2807,8 @@ Every monthly project README should include:
 - [ ] Network with AI community
 - [ ] Plan next learning goals
 - [ ] Consider writing your own research paper
+
+[⬆ Back to Table of Contents](#toc)
 
 ---
 
@@ -2848,3 +2982,5 @@ Every monthly project README should include:
 *Weeks completed: Week 1 ✅*
 *Total items completed: ~35 / ~1270*
 *Monthly projects completed: 0 / 34 (17 Project A + 17 Project B)*
+
+[⬆ Back to Table of Contents](#toc)
