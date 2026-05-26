@@ -75,6 +75,20 @@
 
 All five hit the same systemd-managed Ollama service running on `localhost:11434`.
 
+### The "keep-alive" behavior — why VRAM stays used after `/bye`
+- `/bye` only exits the chat **client**. The Ollama **server** (systemd service) keeps running and **keeps the model loaded in VRAM for 5 minutes by default**.
+- This is intentional: cold model load takes 2-5 sec (disk → VRAM). Keeping it warm = next request is sub-second.
+- Auto-unloads after 5 min of no activity. Configurable per-shell (`OLLAMA_KEEP_ALIVE` env var) or per-request (`keep_alive` JSON field).
+- On 6 GB VRAM: only one largish model fits. If you're switching between models, shorten keep-alive to `30s` or `1m`. If long single-model session, set `-1` (keep forever).
+- Force unload now: `ollama stop <model>` (newer versions) or `curl http://localhost:11434/api/generate -d '{"model":"...","keep_alive":0}'`.
+- Inspect what's loaded and when it'll unload: `ollama ps` shows the `UNTIL` column (countdown in real time).
+
+### Discovering models (there's no `ollama search` — yet)
+- **Canonical browsing:** https://ollama.com/library (filters, descriptions, all tags per model)
+- **Massive expansion via HuggingFace:** Ollama supports `ollama pull hf.co/<user>/<repo>:<quant>` syntax — pulls any GGUF from HF (~50,000+ models vs ~100 in the curated Library).
+- **Reliable HF uploaders:** `bartowski/*`, `lmstudio-community/*`, `MaziyarPanahi/*`, `QuantFactory/*` — these produce clean, well-named GGUF tags.
+- **Curated for 6 GB VRAM:** see "Models That Fit 6GB VRAM" section in main `Readme.md` appendix — pre-vetted picks by category (chat/code/reasoning/vision/embeddings).
+
 ---
 
 ## 🛠 Step-by-Step (What I Actually Did)
@@ -355,6 +369,191 @@ print(response.choices[0].message.content)
 
 **This is huge:** existing code that uses OpenAI can be redirected to your local model by changing one line. LangChain, LlamaIndex, Continue.dev, hundreds of tools all "just work."
 
+### Phase 13: Manage the Keep-Alive (controlling VRAM lifetime)
+
+**The surprise I hit:** after typing `/bye` in chat, `nvidia-smi` STILL showed VRAM in use. Turns out the Ollama server keeps the model warm for 5 minutes by default — only the chat client exited.
+
+#### See what's loaded and the countdown
+
+```bash
+ollama ps
+```
+
+Look at the `UNTIL` column — it's the auto-unload deadline:
+```
+NAME           ID            SIZE      PROCESSOR    UNTIL
+llama3.2:3b    a80c4f17acd5  4.0 GB    100% GPU     4 minutes from now
+```
+
+#### Force-unload now (free VRAM immediately)
+
+```bash
+# Newer Ollama versions:
+ollama stop llama3.2:3b
+
+# OR (universal) via API:
+curl http://localhost:11434/api/generate -d '{
+  "model": "llama3.2:3b",
+  "keep_alive": 0
+}'
+```
+
+After this, `ollama ps` is empty and `nvidia-smi` VRAM drops.
+
+#### Per-shell default (env var)
+
+```bash
+export OLLAMA_KEEP_ALIVE=0      # unload immediately after each request (saves VRAM)
+export OLLAMA_KEEP_ALIVE=30m    # keep loaded 30 min
+export OLLAMA_KEEP_ALIVE=-1     # keep loaded forever (fastest, biggest VRAM cost)
+sudo systemctl restart ollama   # apply to the server process
+```
+
+#### Per-request control (most flexible)
+
+In `curl`:
+```bash
+curl http://localhost:11434/api/generate -d '{
+  "model": "llama3.2:3b",
+  "prompt": "Hello",
+  "keep_alive": "1m"
+}'
+```
+
+In Python:
+```python
+import ollama
+ollama.chat(
+    model='llama3.2:3b',
+    messages=[{'role': 'user', 'content': 'Hi'}],
+    keep_alive=0     # unload right after this request
+)
+```
+
+#### Make it permanent (systemd override)
+
+```bash
+sudo systemctl edit ollama
+# Add:
+# [Service]
+# Environment="OLLAMA_KEEP_ALIVE=30m"
+
+sudo systemctl daemon-reload
+sudo systemctl restart ollama
+```
+
+#### My keep-alive strategy for 6 GB VRAM
+
+| Workflow | Recommended setting |
+|---|---|
+| Long session with ONE model (chat all afternoon) | `OLLAMA_KEEP_ALIVE=-1` (keep forever, fastest) |
+| Switching between models often (3B → 7B → 3B) | `OLLAMA_KEEP_ALIVE=30s` or `1m` (free VRAM quickly) |
+| Need VRAM for other GPU apps (ComfyUI, training) | `OLLAMA_KEEP_ALIVE=0` (always unload) |
+| Default interactive use | leave at `5m` (Ollama default) |
+
+#### Live watch demo (do this once)
+
+In one terminal:
+```bash
+watch -n 1 'ollama ps; echo "---"; nvidia-smi --query-gpu=memory.used --format=csv'
+```
+
+In another:
+```bash
+ollama run llama3.2:3b "Hello"
+```
+
+Watch VRAM jump ~50 MB → ~3 GB instantly, then the 5-minute countdown until auto-unload. Press `Ctrl+C` in the `watch` terminal when done.
+
+### Phase 14: Discovering & Pulling New Models
+
+#### Browse the Ollama Library (canonical)
+
+Go to https://ollama.com/library — has search, filters (Embedding/Vision/Tools), and shows all tags per model.
+
+Each model page → click "Tags" → see every quantization variant with sizes.
+
+#### CLI: list model families from the library (rough)
+
+```bash
+# Family names available in the Ollama Library:
+curl -s https://ollama.com/library | grep -oP 'href="/library/\K[^"]+' | sort -u
+
+# All tags for one model (e.g., qwen2.5):
+curl -s https://ollama.com/library/qwen2.5/tags | grep -oP '<a[^>]*class="group[^"]*"[^>]*>\K[^<]+' | head -30
+```
+
+The website is much nicer for this — these scrapes are just for "I'm in tmux and don't want to alt-tab."
+
+#### Pull DIRECTLY from Hugging Face (the killer feature)
+
+Ollama v0.4+ supports `hf.co/<user>/<repo>:<quant>` syntax — unlocks any GGUF on HuggingFace (~50,000+ models vs ~100 in the curated Library).
+
+```bash
+# Pull a community Llama 3.1 8B GGUF (high-quality uploader):
+ollama pull hf.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF:Q4_K_M
+ollama run hf.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF:Q4_K_M
+
+# Phi-3.5 Mini from a different uploader:
+ollama pull hf.co/QuantFactory/Phi-3.5-mini-instruct-GGUF:Q4_K_M
+```
+
+**Trustworthy GGUF uploaders** (clean tags, consistent naming):
+- `bartowski/*` — most reliable, fresh quants, supports IQ-quants
+- `lmstudio-community/*` — curated by LM Studio team
+- `MaziyarPanahi/*` — wide selection
+- `QuantFactory/*` — community quants
+
+#### Search HuggingFace from CLI
+
+```bash
+# Install HF CLI in your venv:
+uv pip install huggingface_hub
+
+# Search GGUFs via API + jq:
+sudo apt-get install -y jq  # if not installed
+curl -s "https://huggingface.co/api/models?search=qwen+gguf&limit=20" | jq -r '.[].id'
+```
+
+#### My recommended discovery workflow
+
+1. **Decide task:** chat / code / math / vision / multilingual
+2. **Pick size for 6 GB VRAM:**
+   - 1-3B (effortless, fast) — Phi-3 Mini, Llama 3.2 3B, Qwen 2.5 3B, Gemma 2 2B
+   - 4-8B (sweet spot) — Llama 3.1 8B, Qwen 2.5 7B, Mistral 7B Q4_K_M
+   - 9-14B (partial CPU offload, slower)
+   - 14B+ (mostly CPU, very slow — skip on 6 GB)
+3. **Check community signal:**
+   - https://huggingface.co/spaces/lmsys/chatbot-arena-leaderboard (overall)
+   - https://huggingface.co/open-llm-leaderboard (benchmarks)
+   - r/LocalLLaMA weekly "best small model" threads
+4. **Try it:** `ollama pull <name>:<tag>`
+5. **Measure:** TPS via `ollama ps`, quality via your own 5-10 standard test prompts
+6. **Keep or `ollama rm <name>`:** disk gets full fast
+
+### Phase 15: Disk Hygiene as You Try More Models
+
+Models pile up fast. A few maintenance commands:
+
+```bash
+# List with sizes:
+ollama list
+
+# Total disk used:
+du -sh ~/.ollama/models/
+
+# See blob storage details (largest first):
+du -h ~/.ollama/models/blobs/ | sort -hr | head
+
+# Remove a model:
+ollama rm llama3.2:3b
+
+# Remove ALL models (drastic — only if you want to start fresh):
+rm -rf ~/.ollama/models/blobs/* ~/.ollama/models/manifests/*
+```
+
+**Reality:** by Month 3 you'll easily have 50-100 GB of models. Budget 200 GB+ free disk space for serious local AI work.
+
 ---
 
 ## 📊 My Measurements (Fill In)
@@ -380,6 +579,8 @@ print(response.choices[0].message.content)
 6. **Llama 3.2 vs Qwen 2.5 personalities are different.** Llama tends to add more "helpful assistant" framing; Qwen feels more direct and concise. Both are valid for different use cases.
 7. **The "offline" property is real.** Disconnected WiFi, generated answers normally. Local AI delivers on its core promise from day one.
 8. **OpenAI-compatible endpoint = drop-in migration.** Any tool/library expecting OpenAI's API can hit Ollama by just changing `base_url`. This is why the whole open-source ecosystem (LangChain, LlamaIndex, Continue.dev, etc.) "just works" with local models.
+9. **`/bye` doesn't free VRAM — keep-alive does.** The chat client exits but the server keeps the model loaded in VRAM for 5 min by default. This is a feature (warm starts), but on 6 GB VRAM I need to manage it: `ollama stop <model>` to force-unload, or set `OLLAMA_KEEP_ALIVE=0` to never cache. Check `ollama ps` to see the countdown.
+10. **No `ollama search` exists yet — use the website + HF.** Browse https://ollama.com/library, or use the `hf.co/<user>/<repo>:<quant>` syntax to pull ANY GGUF from HuggingFace directly. This unlocks 50,000+ community models vs ~100 in the Ollama Library. `bartowski/*` is the most trusted GGUF uploader on HF.
 
 ---
 
@@ -393,6 +594,9 @@ print(response.choices[0].message.content)
 | Ollama uses CPU instead of GPU | Check `journalctl -u ollama \| grep "inference compute"` — if `library=cpu`, restart Ollama (`sudo systemctl restart ollama`) |
 | Out of memory pulling a model | Either disk full or VRAM tight — try smaller variant (`:3b` instead of `:8b`) |
 | Generation is slow | `ollama ps` — if processor shows `100% CPU` or split, model didn't fit on GPU. Use smaller quantization or smaller model. |
+| VRAM stays used after exiting chat (`/bye`) | Normal — keep-alive default is 5 min. Force unload: `ollama stop <model>` or set `OLLAMA_KEEP_ALIVE=0` env var |
+| `ollama stop` not recognized | Older Ollama version. Use API: `curl http://localhost:11434/api/generate -d '{"model":"...","keep_alive":0}'` |
+| Model takes 5 sec to start every time | Add `OLLAMA_KEEP_ALIVE=-1` to keep it warm (saves load time, uses VRAM continuously) |
 
 ---
 
@@ -406,6 +610,8 @@ print(response.choices[0].message.content)
 - [ ] `ollama ps` shows `100% GPU` while a model is loaded
 - [ ] **You verified offline behavior** — disconnected WiFi, ran Ollama, got a response. ✅
 - [ ] You've tried at least 2 of the 5 interaction methods (interactive chat + one of: curl/Python/OpenAI-compatible)
+- [ ] You know how to discover new models (Ollama Library website + `hf.co/...` for HF GGUFs)
+- [ ] You used `ollama stop` or `keep_alive: 0` to free VRAM on demand
 
 ---
 
