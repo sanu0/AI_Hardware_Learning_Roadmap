@@ -1,0 +1,39 @@
+# Environment + secrets
+.env
+.env.*
+*.key
+*.pem
+.ssh/
+
+# Python / uv
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Model weights & data (these can be huge)
+*.gguf
+*.bin
+*.safetensors
+*.pt
+*.pth
+models/
+data/
+cache/
+
+# IDE / OS junk
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs and traces
+*.log
+logs/
+traces/
+
+# Ollama / llama.cpp local files
+.ollama/
+*.modelfile.local

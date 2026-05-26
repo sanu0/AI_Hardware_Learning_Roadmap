@@ -905,226 +905,35 @@ This roadmap is designed to **reinforce and apply** what you learn in the main r
 ## Week 0 — Setup & First Local Model (Do This Immediately)
 
 > This week is shorter (~3-4 hours total) but unblocks everything. Do it the day you start.
-> **You are on Windows 11 with an NVIDIA GPU. This week sets up your dual-track environment:
-> native Windows for casual chat (Ollama, LM Studio), and WSL2 Ubuntu for serious work
-> (fine-tuning, llama.cpp compilation, training tooling, faster-whisper, Stable Diffusion).
-> WSL2 + CUDA is the single most important Windows-specific setup. Get this right once.**
+> **Detailed daily notes:** `./month1/week0/` (mirrors the main roadmap structure — outline lives here, deep notes live there).
 
----
+### Day 0a — WSL2 + CUDA Toolkit Setup ⭐ (CRITICAL FOR WINDOWS USERS)
+- [ ] Verify NVIDIA driver works on Windows (`nvidia-smi` in PowerShell)
+- [ ] Run `wsl --list --online` to find correct Ubuntu distro name (varies by Windows build)
+- [ ] `wsl --install -d Ubuntu` (or whatever name was listed)
+- [ ] Reboot Windows; set UNIX username + password on first Ubuntu launch
+- [ ] Verify GPU passthrough inside Ubuntu: `nvidia-smi`
+- [ ] `sudo apt update && sudo apt upgrade -y`
+- [ ] Install build essentials: `build-essential cmake git curl wget python3-dev python3-venv libomp-dev pkg-config`
+- [ ] Install CUDA toolkit 12.6 inside WSL2 (NOT the Linux driver — Windows driver is passed through)
+- [ ] Add CUDA to PATH; verify with `nvcc --version`
+- [ ] **Detailed notes:** [`./month1/week0/DAY_0a_WSL2_CUDA_SETUP.md`](./month1/week0/DAY_0a_WSL2_CUDA_SETUP.md)
 
-### 📓 My Personal Setup Journey Log
+### Day 0b — Python + uv + PyTorch in WSL2
+- [ ] Install `uv` (modern Python package manager)
+- [ ] Create `~/local-ai` workspace + Python 3.11 virtual environment
+- [ ] Install PyTorch with CUDA support (`--index-url https://download.pytorch.org/whl/cu121`)
+- [ ] **The moment of truth:** verify `torch.cuda.is_available()` returns `True` + device name shows your GPU
+- [ ] Configure Git globally (`user.name`, `user.email`, `init.defaultBranch main`)
+- [ ] Optional: generate SSH key for GitHub
+- [ ] Install VS Code + WSL extension; open workspace with `code .` from Ubuntu
+- [ ] **Detailed notes:** `./month1/week0/DAY_0b_PYTHON_PYTORCH.md` (create as you complete it)
 
-> Real, dated record of what actually happened during MY setup. Refer back when troubleshooting; future-me will thank present-me.
-
-#### Session 1 — May 20-21, 2026 (Day 0a Start)
-- **Hardware confirmed via `nvidia-smi` on Windows PowerShell:**
-  - GPU: NVIDIA RTX 1000 Ada Generation Laptop GPU
-  - Driver Version: 581.95
-  - Max CUDA supported by driver: 13.0
-  - VRAM: 6141 MiB (6 GB) ✅ matches the roadmap calibration
-- **WSL distribution naming surprise:**
-  - Tried: `wsl --install -d Ubuntu-22.04` → ❌ "Invalid distribution name"
-  - Reason: my Windows build only ships generic `Ubuntu` in `wsl --list --online`
-  - Fix: `wsl --install -d Ubuntu` (no version suffix needed)
-  - **Lesson learned:** ALWAYS run `wsl --list --online` first; don't assume Ubuntu-XX.YY naming.
-- **Install output (worked first try after correct name):**
-  ```
-  The requested operation requires elevation.
-  Installing: Virtual Machine Platform
-  Virtual Machine Platform has been installed.
-  Installing: Windows Subsystem for Linux
-  Windows Subsystem for Linux has been installed.
-  Installing: Ubuntu
-  Ubuntu has been installed.
-  The requested operation is successful. Changes will not be effective until the system is rebooted.
-  ```
-- **Rebooted Windows.** Ubuntu icon appeared in Start menu after reboot.
-- **First Ubuntu launch:** prompted for UNIX username + password (separate from Windows credentials).
-- **Landed at green prompt:** `ksanu@NV-D8M4FB4:~$` (the hostname matches my laptop's Windows hostname — useful to know).
-
-#### Session 2 — May 26, 2026 (Day 0a Continued)
-- **Verified GPU passthrough inside Ubuntu** — `nvidia-smi` worked from within WSL2 ✅ (this is the "it all clicks" moment).
-- **Open question / TODO:** validate `torch.cuda.is_available() == True` after PyTorch install.
-- **Tools I'm using to access WSL2:**
-  - Windows Terminal — native, snappy, tabs
-  - MobaXterm — also lists Ubuntu/WSL as a session (good for if I want X11 forwarding later)
-  - Ubuntu app from Start menu — simplest
-  - **Decision:** Windows Terminal is my daily driver; MobaXterm reserved for future GUI-forwarding needs.
-
-> **Add new entries here as you progress.** Each entry should capture: date, what worked, what surprised you, what error you hit and how you fixed it, what command output looked like. This log is gold when you redo this on a second machine 6 months from now.
-
----
-
-### Day 0a — WSL2 + CUDA Setup ⭐ (CRITICAL FOR WINDOWS USERS) (1-2 hours)
-> Why: 90% of the ML ecosystem is Linux-first. Unsloth, Axolotl, bitsandbytes, training tools all work best (or only) in Linux. WSL2 + CUDA gives you a full Linux dev environment with GPU access, without leaving Windows.
-
-#### Phase 1: Install WSL2 + Ubuntu (one-time, in Windows PowerShell)
-- [x] **Verify CUDA-capable NVIDIA driver is installed on Windows:**
-  - Open PowerShell: `nvidia-smi`
-  - You should see your RTX 1000 Ada listed with driver version
-  - If not, install latest from https://www.nvidia.com/Download/index.aspx
-- [x] **Find the right Ubuntu distribution name (DON'T SKIP THIS):**
-  ```powershell
-  wsl --list --online
-  ```
-  - **Why:** distribution names vary by Windows build. On my machine, only generic `Ubuntu` was available (not `Ubuntu-24.04` or `Ubuntu-22.04`). The exact name matters.
-- [x] **Enable WSL2 + install Ubuntu:**
-  ```powershell
-  # Use the EXACT name from wsl --list --online output:
-  wsl --install -d Ubuntu
-
-  # If that fails or you have older WSL, update first:
-  wsl --update
-  wsl --set-default-version 2
-  ```
-  - **Common error you might hit:** `Invalid distribution name: 'Ubuntu-22.04'` → switch to `Ubuntu` (generic latest LTS).
-- [x] **Reboot Windows** when prompted (the installer says: "Changes will not be effective until the system is rebooted").
-- [x] **First Ubuntu launch:** opens automatically (or from Start → "Ubuntu"). It asks for:
-  - New UNIX username (lowercase, e.g., your first name) — **this is separate from your Windows login**
-  - Password (type twice; **cursor won't move — that's normal Linux behavior**)
-- [x] **You're in!** Prompt looks like `youruser@LAPTOPHOSTNAME:~$`
-
-#### Phase 2: Verify GPU Passthrough (the "moment of truth")
-- [x] **Inside Ubuntu, run:**
-  ```bash
-  nvidia-smi
-  ```
-  - You should see the **exact same GPU** that PowerShell showed. Same model, same VRAM, same driver.
-  - **This is the moment WSL2 + CUDA passthrough proves itself.** Take a screenshot.
-  - **If it fails (`command not found`):** run `wsl --update` and `wsl --shutdown` in PowerShell, then reopen Ubuntu.
-
-#### Phase 3: System Update + Build Tools (~5-10 min)
-- [ ] **Update Ubuntu packages:**
-  ```bash
-  sudo apt update && sudo apt upgrade -y
-  ```
-  - First-time `sudo` prompts for your UNIX password (the one you just created).
-- [ ] **Install build essentials (needed for compiling things like llama.cpp later):**
-  ```bash
-  sudo apt install -y build-essential cmake git curl wget python3-dev python3-venv python3-pip libomp-dev pkg-config
-  ```
-
-#### Phase 4: Install CUDA Toolkit Inside WSL2 (~5-10 min)
-> Critical detail: do NOT install the Linux NVIDIA driver inside WSL2. Use the Windows driver (already passed through). Only install the CUDA *toolkit* (compilers, libraries).
-
-- [ ] **Add NVIDIA's CUDA repo and install toolkit:**
-  ```bash
-  wget https://developer.download.nvidia.com/compute/cuda/repos/wsl-ubuntu/x86_64/cuda-keyring_1.1-1_all.deb
-  sudo dpkg -i cuda-keyring_1.1-1_all.deb
-  sudo apt-get update
-  sudo apt-get install -y cuda-toolkit-12-6
-  # Fallback if 12-6 isn't available for your distro: try cuda-toolkit-12-4 or cuda-toolkit-12-8
-  ```
-- [ ] **CUDA Version mismatch FYI:** `nvidia-smi` shows the *max* CUDA version your DRIVER supports (driver 581.95 supports up to CUDA 13.0). The TOOLKIT version is independent — stick with **12.6** (or 12.8) because that's what PyTorch / Unsloth / bitsandbytes wheels target. Don't chase the latest CUDA toolkit.
-- [ ] **Add CUDA to PATH:**
-  ```bash
-  echo 'export PATH=/usr/local/cuda/bin:$PATH' >> ~/.bashrc
-  echo 'export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH' >> ~/.bashrc
-  source ~/.bashrc
-  ```
-- [ ] **Verify CUDA toolkit installed:**
-  ```bash
-  nvcc --version
-  ```
-  - Should print: `Cuda compilation tools, release 12.6, ...`
-
-#### Phase 5: Common WSL2 Gotchas
-- [ ] **RAM limits:** WSL2 sees ~50% of Windows RAM by default. With 31.5 GB total, that's ~16 GB to WSL2 — usually enough. If you need more, create `C:\Users\<you>\.wslconfig`:
-  ```ini
-  [wsl2]
-  memory=24GB
-  processors=8
-  swap=8GB
-  ```
-  Then run `wsl --shutdown` in PowerShell and reopen Ubuntu.
-- [ ] **GPU is shared with Windows.** If you're training in WSL2, close GPU-heavy apps (games, ComfyUI in native Windows, browser hardware acceleration).
-- [ ] **Multiple ways to access Ubuntu (pick your favorite):**
-  - **Windows Terminal** (recommended) — install from Microsoft Store, gives tabs + PowerShell + Ubuntu side-by-side
-  - **Ubuntu app** from Start menu — single-tab, simplest
-  - **MobaXterm** — shows WSL/Ubuntu as a session; useful if you want X11 GUI forwarding later
-  - **VS Code's integrated terminal** (after Phase 7) — best for actual development
-
----
-
-### Day 0b — Python + uv + Git Setup in WSL2 (45 min)
-
-#### Phase 6: Install uv (Modern Python Package Manager)
-> Why uv: 10-100× faster than `pip`, resolves dependencies correctly, manages Python versions. It's the new standard in ML.
-
-- [ ] **Install uv:**
-  ```bash
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  source ~/.bashrc
-  uv --version
-  ```
-
-#### Phase 7: Create Your Local AI Workspace
-- [ ] **Make the workspace + virtual environment:**
-  ```bash
-  mkdir -p ~/local-ai && cd ~/local-ai
-  uv venv .venv --python 3.11
-  source .venv/bin/activate
-  ```
-  - Your prompt now shows `(.venv)` prefix — you're inside an isolated Python environment.
-- [ ] **Install PyTorch with CUDA support (THE big test):**
-  ```bash
-  uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-  ```
-  - We use the `cu121` wheel — compatible with CUDA 12.x toolkits. PyTorch wheels lag behind toolkit by ~1 minor version, this is normal.
-- [ ] **Verify CUDA works from Python (the moment everything clicks):**
-  ```bash
-  python -c "import torch; print('CUDA available:', torch.cuda.is_available()); print('Device:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU only')"
-  ```
-  - Expected output:
-    ```
-    CUDA available: True
-    Device: NVIDIA RTX 1000 Ada Generation Laptop GPU
-    ```
-  - **🎯 If you see `True` and your GPU name → SUCCESS.** Linux Python is talking to your Windows-passthrough GPU. The entire ML ecosystem is now available to you.
-
-#### Phase 8: Set Up Git
-- [ ] **Configure Git globally:**
-  ```bash
-  git config --global user.name "Your Name"
-  git config --global user.email "you@example.com"
-  git config --global init.defaultBranch main
-  ```
-- [ ] **Optional: SSH key for GitHub** (skip if you don't push to GitHub yet):
-  ```bash
-  ssh-keygen -t ed25519 -C "you@example.com"
-  # Press Enter to accept default path, optionally set a passphrase
-  cat ~/.ssh/id_ed25519.pub  # copy this, paste into GitHub → Settings → SSH Keys
-  ```
-
-#### Phase 9: VS Code WSL Integration (Daily-Driver Setup)
-- [ ] **Install VS Code on Windows** (if not already): https://code.visualstudio.com/
-- [ ] **Install the "WSL" extension** (by Microsoft) from VS Code's Extensions panel (`Ctrl+Shift+X`)
-- [ ] **Open your workspace in VS Code, connected to Ubuntu:**
-  ```bash
-  cd ~/local-ai
-  code .
-  ```
-  - First time: VS Code installs a small server inside WSL2 (one-time, ~30 sec)
-  - You'll see `WSL: Ubuntu` indicator in the bottom-left corner of VS Code
-  - **This is your daily dev environment** for the rest of the roadmap — terminal is Ubuntu, files are inside Linux, but the editor runs natively on Windows. Best of both worlds.
-
----
-
-### Day 0c — File System Layout & Backups (15 min)
-- [ ] **Decide where models live (they get HUGE — 100s of GB by Month 6):**
-  - Windows native (when using Ollama for Windows): `C:\Users\<you>\.ollama\models` (default)
-  - WSL2 Linux: `~/.ollama/models` (separate from Windows install — yes, you can have TWO Ollama installs)
-  - Best: put models on a fast SSD with plenty of free space (200GB+ free recommended by Month 5-6)
-  - If you have multiple drives, set `OLLAMA_MODELS` env var to a fast drive
-- [ ] **Sanity check disk space:**
-  ```bash
-  df -h ~  # check Ubuntu home dir
-  ```
-- [ ] **Decide: Ollama in Windows, WSL2, or both?**
-  - **Windows native:** simplest for casual chat, great GPU perf, integrates with Windows apps
-  - **WSL2:** integrates with your Python ML workflow, can swap models programmatically from your scripts
-  - **Both:** my personal pick — Windows for chat from any app, WSL2 for code that needs to call Ollama programmatically
-  - **Disk impact:** if you install Ollama in both, models are duplicated unless you symlink. For now, install in WSL2 only; add Windows later if you need it.
+### Day 0c — File System Layout & Storage Decisions
+- [ ] Decide where models live: Windows-side, WSL2-side, or both (start: WSL2 only)
+- [ ] Sanity check free disk space (`df -h`) — 200GB+ recommended by Month 5-6
+- [ ] (Optional) Set `OLLAMA_MODELS` env var if you want models on a different drive
+- [ ] **Detailed notes:** `./month1/week0/DAY_0c_FILESYSTEM.md` (create as you complete it)
 
 ### Day 1 — Install Ollama (30 min)
 - [ ] Download Ollama for Windows: https://ollama.com/download
