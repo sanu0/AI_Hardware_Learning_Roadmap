@@ -58,6 +58,23 @@
 - **Total: ~3 GB VRAM** → comfortably fits in 6 GB with room for system overhead
 - Llama 3.1 8B Q4_K_M (the next step up) needs ~5-5.5 GB → just barely fits; tight context.
 
+### Internet is needed ONLY for the initial download
+- After `ollama pull` or `ollama run` finishes, the model weights live on your disk in `~/.ollama/models/`.
+- All subsequent inference is **100% offline** — no telemetry, no API calls, no cloud.
+- Internet needed again only for: pulling new models (`ollama pull X`), updating Ollama itself, pushing to Ollama Hub.
+- **You can literally pull the WiFi out and Ollama keeps working.** That's the entire point of local AI.
+
+### The 5 ways to interact with Ollama (memorize these)
+| Method | When to use | Internet needed (after model download)? |
+|---|---|---|
+| `ollama run <model>` interactive `>>>` | Quick chat, exploration | ❌ No |
+| `ollama run <model> "prompt"` one-shot | Scripts, one-off questions | ❌ No |
+| REST API `POST localhost:11434/api/generate` | Custom apps, any language | ❌ No |
+| Python `ollama` library | Python integration | ❌ No |
+| OpenAI-compatible at `localhost:11434/v1` | Drop-in for tools expecting OpenAI | ❌ No |
+
+All five hit the same systemd-managed Ollama service running on `localhost:11434`.
+
 ---
 
 ## 🛠 Step-by-Step (What I Actually Did)
@@ -234,6 +251,110 @@ ollama list
 
 Should show both models you pulled today, with sizes.
 
+### Phase 10: Verify You Can Use Ollama OFFLINE (the lightbulb moment)
+
+The whole point of local AI is that **once a model is downloaded, you never need internet again to use it**. Prove it to yourself:
+
+```bash
+# 1. Note what you have locally:
+ollama list
+
+# 2. Turn off WiFi (system tray) or Ethernet.
+
+# 3. Confirm you really are offline:
+ping -c 2 google.com    # should fail with "Network is unreachable" or timeout
+
+# 4. Use Ollama anyway:
+ollama run llama3.2:3b "What's the capital of France?"
+
+# It answers normally. Magic. ✅
+
+# 5. Reconnect WiFi when done.
+```
+
+Do this once and the "local AI" concept stops being abstract — you've watched an LLM generate an answer with zero packets going anywhere outside your laptop.
+
+### Phase 11: Where the Models Actually Live
+
+```bash
+ls -lah ~/.ollama/models/
+du -sh ~/.ollama/models/
+```
+
+Structure:
+- `~/.ollama/models/blobs/` — model weight files (content-addressed by SHA256, like Docker layers)
+- `~/.ollama/models/manifests/` — small JSON files mapping model:tag names to blob hashes
+
+**You own these files.** Backup the folder, copy to another machine, or take on a plane. The model is just a ~2 GB file (for 3B Q4_K_M).
+
+### Phase 12: The 5 Ways to Interact With Ollama
+
+#### Way 1: Interactive Chat
+```bash
+ollama run llama3.2:3b
+# >>> chat here
+# /bye to exit
+```
+
+#### Way 2: One-Shot Query (great for scripts)
+```bash
+ollama run llama3.2:3b "Explain quantum entanglement in one paragraph"
+# Prints answer and exits
+```
+
+#### Way 3: REST API (curl)
+Ollama runs an HTTP server on `localhost:11434` 24/7 via systemd.
+
+```bash
+curl http://localhost:11434/api/generate -d '{
+  "model": "llama3.2:3b",
+  "prompt": "Why is the sky blue?",
+  "stream": false
+}'
+```
+
+For chat-style (with message history):
+```bash
+curl http://localhost:11434/api/chat -d '{
+  "model": "llama3.2:3b",
+  "messages": [{"role": "user", "content": "Hello"}],
+  "stream": false
+}'
+```
+
+#### Way 4: Python `ollama` Library
+```bash
+# In your venv:
+uv pip install ollama
+```
+
+```python
+import ollama
+response = ollama.chat(
+    model='llama3.2:3b',
+    messages=[{'role': 'user', 'content': 'Why is the sky blue?'}]
+)
+print(response['message']['content'])
+```
+
+#### Way 5: OpenAI-Compatible Endpoint (the magic for migration)
+Ollama also speaks OpenAI's API format. Any tool that expects OpenAI works against Ollama with just a URL swap.
+
+```python
+from openai import OpenAI
+client = OpenAI(
+    base_url='http://localhost:11434/v1',
+    api_key='ollama'  # required but ignored
+)
+response = client.chat.completions.create(
+    model='llama3.2:3b',
+    messages=[{'role': 'user', 'content': 'Hello'}]
+)
+print(response.choices[0].message.content)
+```
+
+**This is huge:** existing code that uses OpenAI can be redirected to your local model by changing one line. LangChain, LlamaIndex, Continue.dev, hundreds of tools all "just work."
+
 ---
 
 ## 📊 My Measurements (Fill In)
@@ -257,6 +378,8 @@ Should show both models you pulled today, with sizes.
 4. **3B models are FAST on 6 GB VRAM.** Way more responsive than I expected — feels close to ChatGPT for short responses.
 5. **First download is the slowest step.** Subsequent runs of the same model are instant (cached in `~/.ollama/models/`).
 6. **Llama 3.2 vs Qwen 2.5 personalities are different.** Llama tends to add more "helpful assistant" framing; Qwen feels more direct and concise. Both are valid for different use cases.
+7. **The "offline" property is real.** Disconnected WiFi, generated answers normally. Local AI delivers on its core promise from day one.
+8. **OpenAI-compatible endpoint = drop-in migration.** Any tool/library expecting OpenAI's API can hit Ollama by just changing `base_url`. This is why the whole open-source ecosystem (LangChain, LlamaIndex, Continue.dev, etc.) "just works" with local models.
 
 ---
 
@@ -281,6 +404,8 @@ Should show both models you pulled today, with sizes.
 - [ ] You had a real conversation with at least one local model
 - [ ] You measured tokens/sec on your hardware
 - [ ] `ollama ps` shows `100% GPU` while a model is loaded
+- [ ] **You verified offline behavior** — disconnected WiFi, ran Ollama, got a response. ✅
+- [ ] You've tried at least 2 of the 5 interaction methods (interactive chat + one of: curl/Python/OpenAI-compatible)
 
 ---
 
