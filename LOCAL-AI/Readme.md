@@ -919,11 +919,26 @@ This roadmap is designed to **reinforce and apply** what you learn in the main r
   - If not, install latest from https://www.nvidia.com/Download/index.aspx
 - [ ] **Enable WSL2 (if not already):**
   ```powershell
+  # FIRST: see what distributions are available on your Windows version
+  wsl --list --online
+
+  # THEN install using the exact name from that list (one of these will work):
+  wsl --install -d Ubuntu-24.04   # preferred (latest LTS, what most ML guides use today)
+  # OR if 24.04 isn't listed:
+  wsl --install -d Ubuntu         # generic latest LTS
+  # OR (older Windows builds):
   wsl --install -d Ubuntu-22.04
+
+  # Set WSL2 as default version
   wsl --set-default-version 2
+
+  # If wsl itself is outdated, update first:
+  wsl --update
   ```
   - Restart if prompted
   - Set up username/password in the Ubuntu shell that opens
+  - **Common error:** "Invalid distribution name" → run `wsl --list --online` to see exact names available on your build
+  - **Tip:** Ubuntu 24.04 is the recommended LTS as of 2025-26; only fall back to 22.04 if 24.04 isn't listed
 - [ ] **Verify GPU passthrough works:**
   - In WSL2 Ubuntu shell: `nvidia-smi`
   - You should see your RTX 1000 Ada from inside WSL (proves CUDA passthrough is working)
@@ -932,8 +947,13 @@ This roadmap is designed to **reinforce and apply** what you learn in the main r
   wget https://developer.download.nvidia.com/compute/cuda/repos/wsl-ubuntu/x86_64/cuda-keyring_1.1-1_all.deb
   sudo dpkg -i cuda-keyring_1.1-1_all.deb
   sudo apt-get update
+  # Pick a version your Windows driver supports (check `nvidia-smi` → "CUDA Version" in the header).
+  # Recommended: 12.6 (rock-solid) or 12.8 (newer). 13.0+ is fine if driver supports.
+  # Most ML libraries (PyTorch, Unsloth, bitsandbytes) ship CUDA 12.x wheels — don't go higher than 12.x unless you must.
   sudo apt-get -y install cuda-toolkit-12-6
+  # If 12-6 isn't in the repo for your distro, try: cuda-toolkit-12-4 or cuda-toolkit-12-8
   ```
+  - **CUDA Version mismatch FYI:** `nvidia-smi` shows the *max* CUDA version your DRIVER supports (e.g., 13.0), not the toolkit version you must install. The toolkit is independent and is what your code links against. Pick toolkit 12.x to match what PyTorch wheels expect.
 - [ ] **Add CUDA to PATH:**
   ```bash
   echo 'export PATH=/usr/local/cuda/bin:$PATH' >> ~/.bashrc
