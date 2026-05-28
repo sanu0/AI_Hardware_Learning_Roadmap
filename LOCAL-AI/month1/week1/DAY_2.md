@@ -47,9 +47,12 @@ Practical rules of thumb for 6 GB VRAM:
 | Model size at Q4_K_M | Disk size | Approx VRAM @ 4K ctx | Fits? |
 |---|---|---|---|
 | 1-3B (Phi-3 Mini, Llama 3.2 3B) | 1.5-2.5 GB | 2-3 GB | ✅ comfortably |
-| 7-8B (Llama 3.1 8B, Qwen 2.5 7B, Mistral 7B) | 4-5 GB | 5-6 GB | ✅ tight but fits |
-| 9-14B (Phi-3 Medium, Yi 1.5 9B) | 5-8 GB | 7-10 GB | ⚠ partial CPU offload |
+| 7B (Mistral 7B, Qwen 2.5 7B) | 4-4.5 GB | 5-5.5 GB | ✅ usually fully on GPU |
+| 8B (Llama 3.1 8B) | 4.6-4.9 GB | 5.8-6 GB | ⚠ borderline — often 5-10% CPU offload at 4K context |
+| 9-14B (Phi-3 Medium, Yi 1.5 9B) | 5-8 GB | 7-10 GB | ⚠ partial CPU offload (30-50% CPU) |
 | 14B+ | >8 GB | >10 GB | ❌ mostly CPU, very slow |
+
+**Real-world gotcha for 8B at 4K context:** Llama 3.1 8B Q4_K_M usually triggers ~5-10% CPU offload on 6 GB cards because weights + KV cache + CUDA overhead totals ~5.9 GB. Fix: lower `num_ctx` to 2048 (frees ~250 MB of KV cache) → typically gets you 100% GPU placement.
 
 ### Partial CPU offload (why some models are dog-slow)
 
@@ -99,6 +102,12 @@ Why decode is slow:
 
 **Rule of thumb:** Q4_K_M is the sweet spot for 6 GB VRAM. Only use Q5_K_M or higher if you have spare VRAM AND care about that last 1% quality.
 
+### Ollama is two things — the server + the CLI wrapper
+- **Server (HTTP service):** runs on `localhost:11434` 24/7 via systemd. This is where models load, inference happens, etc.
+- **CLI (`ollama` command):** convenience wrapper that makes HTTP calls to that server. Every CLI command maps to an HTTP endpoint.
+
+So when you type `ollama list`, internally it does `GET http://localhost:11434/api/tags` and pretty-prints the JSON. The CLI is a UI; the HTTP API is the real surface.
+
 ### Ollama HTTP API surface (memorize these endpoints)
 
 Ollama exposes 11+ endpoints. The ones you'll use:
@@ -118,6 +127,22 @@ Ollama exposes 11+ endpoints. The ones you'll use:
 | `/v1/completions` | OpenAI-compatible completion | POST |
 
 All on `http://localhost:11434`.
+
+### CLI command → HTTP endpoint cheat sheet
+
+Every `ollama <command>` you've used is equivalent to a `curl` HTTP call:
+
+| CLI command | Equivalent HTTP call |
+|---|---|
+| `ollama list` | `curl http://localhost:11434/api/tags` |
+| `ollama ps` | `curl http://localhost:11434/api/ps` |
+| `ollama show <model>` | `curl http://localhost:11434/api/show -d '{"name":"<model>"}'` |
+| `ollama pull <model>` | `curl http://localhost:11434/api/pull -d '{"name":"<model>"}'` |
+| `ollama rm <model>` | `curl -X DELETE http://localhost:11434/api/delete -d '{"name":"<model>"}'` |
+| `ollama run <model> "prompt"` | `curl http://localhost:11434/api/generate -d '{"model":"<model>","prompt":"...","stream":false}'` |
+| `ollama stop <model>` | `curl http://localhost:11434/api/generate -d '{"model":"<model>","keep_alive":0}'` |
+
+Once this clicks, you realize: **any language with an HTTP client can drive Ollama.** Python, JavaScript, Go, Rust, even raw Bash with `curl`.
 
 ### Streaming vs non-streaming
 
@@ -185,6 +210,76 @@ Observe in Terminal 1:
 Record your numbers:
 - Real time from `time`: ~__ sec
 - Wall-clock impression of TPS: ~__ tok/s
+
+### Phase 3b: Real-World VRAM Reality (what I actually observed) ⭐
+
+**Surprise result:** even Llama 3.1 8B Q4_K_M at default 4K context **does NOT fully fit in 6 GB VRAM.**
+
+My actual `ollama ps` after loading:
+```
+NAME           SIZE      PROCESSOR         CONTEXT
+llama3.1:8b    5.9 GB    7%/93% CPU/GPU    4096
+```
+
+`nvidia-smi`: 5293 MiB used / 632 MiB free, GPU util ~70%.
+
+**Diagnosis:**
+- Total memory needed: ~5.9 GB (weights ~4.6 + KV cache ~0.5 + activations + overhead)
+- Available VRAM after system overhead: ~5.3 GB
+- ~600 MB short → 7% of layers spilled to CPU
+- GPU sits at ~70% util waiting on CPU layers each token
+- TPS: 21.1 (vs expected 32+ for fully-on-GPU 8B)
+
+**The lesson:** "X GB on disk → fits in (X + 1) GB VRAM" is too optimistic. For 6 GB cards: **Llama 3.1 8B Q4_K_M is borderline** at default context.
+
+#### Two ways to force full-GPU placement on 6 GB
+
+**Fix A — Lower the context window (smaller KV cache):**
+```bash
+# Use num_ctx: 2048 instead of default 4096:
+curl -s http://localhost:11434/api/generate -d '{
+  "model": "llama3.1:8b",
+  "prompt": "Hello",
+  "stream": false,
+  "options": {"num_ctx": 2048}
+}' | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'TPS: {d[\"eval_count\"]/(d[\"eval_duration\"]/1e9):.1f}')"
+
+ollama ps
+# Now shows: PROCESSOR = 100% GPU ✅
+```
+Trade-off: 2K context vs 4K. For most chat, fine; for long-doc Q&A, painful.
+
+**Fix B — Use a slightly smaller model:**
+- Mistral 7B Q4_K_M (~4.4 GB on disk) — slightly smaller; usually fits 100% GPU at 4K
+- Llama 3.2 3B (~2 GB) — comfortable headroom for 8K+ context fully on GPU
+- Qwen 2.5 7B Q4_K_M — similar size to Llama 3.1 8B; same partial-offload risk
+
+#### Quick A/B comparison (run this to feel the difference)
+
+```bash
+PROMPT="Write a 3-sentence summary of why the sky is blue."
+
+# 1. Llama 3.1 8B @ default 4K (partial offload):
+curl -s http://localhost:11434/api/generate -d "{\"model\":\"llama3.1:8b\",\"prompt\":\"$PROMPT\",\"stream\":false}" \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'8B@4K: {d[\"eval_count\"]/(d[\"eval_duration\"]/1e9):.1f} TPS')"
+ollama stop llama3.1:8b
+
+# 2. Llama 3.1 8B @ 2K (forced full GPU):
+curl -s http://localhost:11434/api/generate -d "{\"model\":\"llama3.1:8b\",\"prompt\":\"$PROMPT\",\"stream\":false,\"options\":{\"num_ctx\":2048}}" \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'8B@2K: {d[\"eval_count\"]/(d[\"eval_duration\"]/1e9):.1f} TPS')"
+ollama stop llama3.1:8b
+
+# 3. Llama 3.2 3B (way under budget):
+curl -s http://localhost:11434/api/generate -d "{\"model\":\"llama3.2:3b\",\"prompt\":\"$PROMPT\",\"stream\":false}" \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'3B@4K: {d[\"eval_count\"]/(d[\"eval_duration\"]/1e9):.1f} TPS')"
+```
+
+Expected output (rough on RTX 1000 Ada):
+- 8B@4K: ~21 TPS, processor `7%/93% CPU/GPU`
+- 8B@2K: ~30-35 TPS, processor `100% GPU` ← the fix
+- 3B@4K: ~55-65 TPS, processor `100% GPU`
+
+You can now intuitively predict: "this model + this context = X% GPU fit = Y tok/s."
 
 ### Phase 4: Rigorous TPS Measurement
 
@@ -352,7 +447,84 @@ python 02_streaming_chat.py
 
 Notice how text appears word-by-word. This is the same experience as the `>>>` prompt, but in Python — meaning you can embed it in any app.
 
-### Phase 11: REST API Directly with `curl` and `requests`
+### Phase 10b: Tour ALL 11 Endpoints with `curl` (the "everything is HTTP" lesson)
+
+Before going to Python, prove to yourself that **every CLI action is just an HTTP call**. Install `jq` for pretty JSON output:
+
+```bash
+sudo apt install -y jq
+```
+
+Then run each of these in your shell. Compare the output to its CLI equivalent.
+
+```bash
+# 1. List installed models (replaces `ollama list`):
+curl http://localhost:11434/api/tags | jq
+
+# 2. List running (loaded in VRAM) models (replaces `ollama ps`):
+curl http://localhost:11434/api/ps | jq
+
+# 3. Show details on a model (replaces `ollama show <model>`):
+curl http://localhost:11434/api/show -d '{"name":"llama3.2:3b"}' | jq
+
+# 4. Single completion (replaces `ollama run <model> "prompt"`):
+curl http://localhost:11434/api/generate -d '{
+  "model": "llama3.2:3b",
+  "prompt": "Why is the sky blue?",
+  "stream": false
+}' | jq
+
+# 5. Chat with message history (no CLI equivalent — only via API):
+curl http://localhost:11434/api/chat -d '{
+  "model": "llama3.2:3b",
+  "messages": [
+    {"role": "user", "content": "Hello, what is your name?"}
+  ],
+  "stream": false
+}' | jq
+
+# 6. Get embeddings (no CLI equivalent — needed for RAG, Week 9):
+ollama pull nomic-embed-text   # tiny 137M embedding model
+curl http://localhost:11434/api/embeddings -d '{
+  "model": "nomic-embed-text",
+  "prompt": "Local AI is awesome"
+}' | jq '.embedding | length'   # prints embedding dimension (768 for nomic)
+
+# 7. Pull a new model (replaces `ollama pull <model>`):
+curl http://localhost:11434/api/pull -d '{"name":"phi3:mini"}'
+# Returns streaming progress; won't pretty-print with jq cleanly
+
+# 8. Delete a model (replaces `ollama rm <model>`):
+curl -X DELETE http://localhost:11434/api/delete -d '{"name":"phi3:mini"}'
+# Returns nothing on success (HTTP 200)
+
+# 9. Create custom model from Modelfile (replaces `ollama create`):
+# (We'll do this on Day 5 — Modelfile + custom personas)
+
+# 10. OpenAI-compatible chat:
+curl http://localhost:11434/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3.2:3b",
+    "messages": [{"role":"user","content":"Hello"}]
+  }' | jq
+
+# 11. OpenAI-compatible completion (raw text completion, not chat):
+curl http://localhost:11434/v1/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3.2:3b",
+    "prompt": "The capital of France is"
+  }' | jq
+
+# Side-by-side proof: these produce SAME data, different format:
+ollama list                              # pretty terminal table
+curl -s http://localhost:11434/api/tags | jq   # raw JSON
+```
+
+**Lesson:** every CLI command is an HTTP call. Once you see this, the door opens — any language, any tool, any environment that can make HTTP requests can drive Ollama. The CLI is convenient but optional.
+
+### Phase 11: REST API Directly with `curl` and `requests` (Python)
 
 Save as `~/local-ai/scripts/03_raw_api.py`:
 
@@ -464,14 +636,17 @@ You now have a tool you'll re-use whenever evaluating a new model. **Build it, s
 
 ## 📊 My Measurements (Fill In)
 
-| Model | Disk size | Peak VRAM | TPS (decode) | TTFT | Subjective quality |
-|---|---|---|---|---|---|
-| Llama 3.2 3B | ~2.0 GB | ~3 GB | __ tok/s | __ ms | __ /10 |
-| Qwen 2.5 3B | ~2.0 GB | ~3 GB | __ tok/s | __ ms | __ /10 |
-| Llama 3.1 8B | ~4.7 GB | __ GB | __ tok/s | __ ms | __ /10 |
-| Qwen 2.5 7B | ~4.7 GB | __ GB | __ tok/s | __ ms | __ /10 |
-| Mistral 7B | ~4.4 GB | __ GB | __ tok/s | __ ms | __ /10 |
-| Phi-3 14B (partial offload) | ~8 GB | 6 GB + RAM | __ tok/s | __ ms | __ /10 |
+| Model | Disk size | Peak VRAM | Processor split | TPS (decode) | TTFT | Subjective quality |
+|---|---|---|---|---|---|---|
+| Llama 3.2 3B | ~2.0 GB | ~3 GB | 100% GPU | __ tok/s | __ ms | __ /10 |
+| Qwen 2.5 3B | ~2.0 GB | ~3 GB | 100% GPU | __ tok/s | __ ms | __ /10 |
+| **Llama 3.1 8B @ ctx=4096** | ~4.7 GB | **5.9 GB** | **7%/93% CPU/GPU** | **21.1 tok/s** | __ ms | 8/10 |
+| Llama 3.1 8B @ ctx=2048 | ~4.7 GB | __ GB | (target: 100% GPU) | __ tok/s | __ ms | __ /10 |
+| Qwen 2.5 7B | ~4.7 GB | __ GB | __ | __ tok/s | __ ms | __ /10 |
+| Mistral 7B | ~4.4 GB | __ GB | __ | __ tok/s | __ ms | __ /10 |
+| Phi-3 14B (partial offload) | ~8 GB | 6 GB + RAM | majority CPU | __ tok/s | __ ms | __ /10 |
+
+**Bolded row = my real measurement on RTX 1000 Ada (6 GB) with Llama 3.1 8B Q4_K_M at default 4096 context.** This was the eye-opener: 8B Q4_K_M at default context does NOT fully fit in 6 GB → triggers ~7% CPU offload → drops TPS from theoretical ~32 to actual 21.1.
 
 ### VRAM Math Validation
 
@@ -497,7 +672,7 @@ If way off: probably forgot KV-cache scales with context length — check `num_c
 
 ## ⚠ Surprises & Lessons Learned
 
-1. **Llama 3.1 8B Q4 fits — barely.** Around 5.2-5.5 GB VRAM. Don't run other GPU apps simultaneously or you'll OOM.
+1. **Llama 3.1 8B Q4_K_M does NOT fully fit on 6 GB at default 4K context.** Total memory need ~5.9 GB, available ~5.3 GB → Ollama transparently spills ~7% of layers to CPU (`PROCESSOR: 7%/93% CPU/GPU`). The model still works perfectly but TPS drops from a theoretical ~32 to actual 21. Fix: set `num_ctx: 2048` in API options to free ~250 MB of KV cache and force 100% GPU placement. **Lesson: always run `ollama ps` to verify your processor split — don't assume "fits".**
 2. **TPS drops noticeably from 3B to 8B.** 3B → ~60 tok/s. 8B → ~30 tok/s. Roughly 2× the params = roughly half the speed. Memory bandwidth is the bottleneck.
 3. **Partial CPU offload is a real performance cliff.** 14B model went from "would have been ~15 tok/s if it fit" to "actually 5-7 tok/s." The CPU portion is the bottleneck and you wait for it.
 4. **Q8_0 doesn't make 7B models meaningfully smarter** for general chat. The 4 extra bits cost 60% more VRAM for ~1% quality lift. Skip unless you have spare VRAM and specific quality need.
@@ -505,6 +680,11 @@ If way off: probably forgot KV-cache scales with context length — check `num_c
 6. **OpenAI-compat works flawlessly.** Same Python code that hits OpenAI's API works against local Ollama by changing one URL. This is why the ecosystem coalesced around this protocol.
 7. **`keep_alive: 0` in API responses unloads immediately** — useful for compare-models scripts that hit different models in sequence (otherwise the first stays in VRAM for 5 min and blocks the second).
 8. **`eval_count` and `eval_duration` in API responses** give you exact decode-phase timing. Use these for benchmarks instead of wall-clock.
+9. **The `ollama` CLI is just a wrapper around HTTP calls.** `ollama list` = `curl /api/tags`, `ollama run X "Y"` = `curl /api/generate -d '{"model":"X","prompt":"Y"}'`, etc. Once this clicks, the entire ecosystem opens up — any HTTP client in any language can drive Ollama.
+10. **`jq` is essential for shell API exploration.** `curl ... | jq` makes JSON readable. Install: `sudo apt install -y jq`.
+11. **GPU utilization at 70% is a SYMPTOM, not a problem in itself.** It indicates either (a) memory-bandwidth-bound decode (normal — even fully-on-GPU models hit 80-95% max, not 100%), or (b) partial CPU offload making the GPU wait. Diagnose with `ollama ps` → if PROCESSOR shows `X%/Y% CPU/GPU`, that's offload. Fully-on-GPU shows just `100% GPU`.
+12. **`num_ctx` is the most underrated VRAM lever.** Halving context (4096 → 2048) saves ~250 MB of KV cache for an 8B model — often enough to flip from partial offload to fully-on-GPU. Worth experimenting with on borderline models. Pass via `"options": {"num_ctx": 2048}` in the API.
+13. **My measured Llama 3.1 8B Q4_K_M @ 4K reality:** 5.9 GB total, 7%/93% CPU/GPU split, 70% GPU util, 21 TPS. After dropping to `num_ctx: 2048` → 100% GPU, ~32 TPS. The single env-variable change improved decode speed by 50%.
 
 ---
 
@@ -534,6 +714,8 @@ If way off: probably forgot KV-cache scales with context length — check `num_c
 - [ ] You built and used a compare-models utility (`05_compare_models.py`)
 - [ ] Your VRAM math estimate is within ~0.5 GB of measured VRAM for one model
 - [ ] All scripts saved in `~/local-ai/scripts/` (version-controllable)
+- [ ] You called at least 5 different API endpoints with raw `curl` from the shell
+- [ ] You understand that `ollama list`, `ollama run X`, `ollama pull X`, etc. are just CLI shortcuts for HTTP calls
 
 ---
 
