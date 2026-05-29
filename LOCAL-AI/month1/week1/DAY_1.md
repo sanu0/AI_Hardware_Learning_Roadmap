@@ -59,7 +59,7 @@
 - Llama 3.1 8B Q4_K_M (the next step up) needs ~5-5.5 GB → just barely fits; tight context.
 
 ### Internet is needed ONLY for the initial download
-- After `ollama pull` or `ollama run` finishes, the model weights live on your disk in `~/.ollama/models/`.
+- After `ollama pull` or `ollama run` finishes, the model weights live on your disk in `/usr/share/ollama/.ollama/models/` (the systemd service user's home — NOT your `~/.ollama/`, which only stores client config). See Phase 11 for the full architecture.
 - All subsequent inference is **100% offline** — no telemetry, no API calls, no cloud.
 - Internet needed again only for: pulling new models (`ollama pull X`), updating Ollama itself, pushing to Ollama Hub.
 - **You can literally pull the WiFi out and Ollama keeps working.** That's the entire point of local AI.
@@ -288,18 +288,189 @@ ollama run llama3.2:3b "What's the capital of France?"
 
 Do this once and the "local AI" concept stops being abstract — you've watched an LLM generate an answer with zero packets going anywhere outside your laptop.
 
-### Phase 11: Where the Models Actually Live
+### Phase 11: Where the Models Actually Live (Deep Dive)
 
-```bash
-ls -lah ~/.ollama/models/
-du -sh ~/.ollama/models/
+#### Critical gotcha: there are TWO `.ollama/` directories on Linux ⭐
+
+When you install Ollama via the official Linux installer, it sets up a **systemd service running as a dedicated `ollama` user**, not as your user. This means there are **two different `.ollama/` directories**:
+
+| Directory | Owner | Contains | Size |
+|---|---|---|---|
+| `~/.ollama/` (your user) | you | `id_ed25519` keys, CLI history | ~16 KB |
+| `/usr/share/ollama/.ollama/` (service user) | `ollama` | `models/`, the actual GBs | many GB |
+
+If you run `du -sh ~/.ollama/` and see only KB, **that's normal** — the models are not there. They're in the service user's home.
+
+#### Why this client/server split exists
+
+Ollama uses a privilege-separated architecture similar to Docker:
+```
+Your user (ksanu)                       ollama service user
+─────────────────                       ───────────────────
+ollama CLI                              systemd service
+  │                                     (background, auto-starts)
+  │ HTTP localhost:11434                 │
+  └──────────────────────────────────────┘
+   ~/.ollama/ = client state             /usr/share/ollama/.ollama/ = server state
+   • id_ed25519 (push identity)          • models/blobs/  ← model weights here
+   • history                              • models/manifests/
+   • ~16 KB                               • many GB
 ```
 
-Structure:
-- `~/.ollama/models/blobs/` — model weight files (content-addressed by SHA256, like Docker layers)
-- `~/.ollama/models/manifests/` — small JSON files mapping model:tag names to blob hashes
+Reasons for the separation:
+1. Service runs 24/7 without you logged in
+2. Multiple users on the same machine share the same model storage
+3. Service user owns model files → safer permissions
+4. systemd manages auto-start / logs / restarts
 
-**You own these files.** Backup the folder, copy to another machine, or take on a plane. The model is just a ~2 GB file (for 3B Q4_K_M).
+#### Find YOUR actual model storage
+
+```bash
+# Confirm which user runs the service (look for "User=ollama"):
+systemctl cat ollama | grep -E "^User|^ExecStart|^Environment"
+
+# Quick alternative: check the running process:
+ps aux | grep ollama | head -3
+
+# Real model storage location:
+sudo ls -la /usr/share/ollama/.ollama/
+sudo du -sh /usr/share/ollama/.ollama/
+
+# Per-blob breakdown (these are your model weights):
+sudo du -h /usr/share/ollama/.ollama/models/blobs/* | sort -hr | head -10
+
+# All manifests (model recipes):
+sudo find /usr/share/ollama/.ollama/models/manifests -type f
+```
+
+Real-world structure:
+```
+/usr/share/ollama/.ollama/
+└── models/
+    ├── manifests/       # tiny JSON files (recipes)
+    │   └── registry.ollama.ai/library/<model>/<tag>
+    └── blobs/           # actual large weight files
+        ├── sha256-abc123...   ← the GGUF (~2-5 GB)
+        ├── sha256-def456...   ← tokenizer (~5 MB)
+        └── sha256-ghi789...   ← chat template (~1 KB)
+```
+
+#### The two-layer model: manifests + blobs (genuinely clever)
+
+**Manifests** — tiny JSON files (~1 KB each) describing each model. Like Docker image manifests. Each one lists:
+- Model metadata (name, tag, parameter count)
+- A list of **blob digests** (SHA-256 hashes) that compose the model
+
+```bash
+# Inspect one (e.g. llama3.2:3b):
+sudo cat /usr/share/ollama/.ollama/models/manifests/registry.ollama.ai/library/llama3.2/3b
+```
+You'll see something like:
+```json
+{
+  "schemaVersion": 2,
+  "config": {"digest": "sha256:abc123...", "size": 485},
+  "layers": [
+    {"digest": "sha256:def456...", "size": 2010000000, "mediaType": "...image.model"},
+    {"digest": "sha256:ghi789...", "size": 11000, "mediaType": "...image.template"},
+    ...
+  ]
+}
+```
+
+**Blobs** — actual content. Files named by SHA-256 hash (`sha256-abc123...`). The largest is the model weights (GGUF); smaller ones are tokenizer, chat template, license.
+
+```bash
+# Largest blobs first (these are your model weights):
+sudo du -h /usr/share/ollama/.ollama/models/blobs/* | sort -hr | head -10
+```
+
+#### 🎯 The deduplication trick
+
+If two models share the SAME tokenizer or chat template (e.g., `llama3.1:8b` and `llama3.1:8b-instruct-q4_K_S`), Ollama stores that blob **once** and both manifests reference it. This is why `ollama list` can show 30 GB of models but `du` reports only 25 GB on disk.
+
+#### What `ollama list` shows vs actual disk usage
+```bash
+ollama list                                # registered models (with reported sizes)
+sudo du -sh /usr/share/ollama/.ollama/     # ACTUAL disk space used (post-deduplication)
+df -h ~                                    # filesystem-level free space (WSL2 disk)
+```
+
+**You own these files.** Backup the directory (with `sudo tar`), copy to another machine, take on a plane.
+
+#### ⚠ The WSL2 Disk Trap (critical to know on Windows!)
+
+Your Ubuntu+models live inside a virtual disk file on Windows:
+```powershell
+# Run from PowerShell on the Windows side:
+ls "$env:LOCALAPPDATA\Packages\CanonicalGroupLimited.Ubuntu_*\LocalState\"
+# You'll see ext4.vhdx — this is the entire WSL2 filesystem
+```
+
+Two things to know:
+1. **Default max size = 1 TB** (you won't unexpectedly run out), but the file **grows on your C: drive as you fill WSL2.**
+2. **WSL2 vhdx never auto-shrinks.** Even after `ollama rm <model>`, the vhdx stays the same size on Windows. You must manually compact it to reclaim disk space.
+
+Check current vhdx size from PowerShell:
+```powershell
+$v = Get-ChildItem "$env:LOCALAPPDATA\Packages\CanonicalGroupLimited.Ubuntu_*\LocalState\ext4.vhdx" -Recurse | Select-Object -First 1
+"{0:N2} GB on Windows disk" -f ($v.Length / 1GB)
+```
+
+To reclaim space after deleting models (only when you actually need space back):
+```powershell
+# In PowerShell as Administrator:
+wsl --shutdown
+diskpart
+```
+At the `DISKPART>` prompt:
+```
+select vdisk file="C:\Users\<you>\AppData\Local\Packages\CanonicalGroupLimited.Ubuntu_<id>\LocalState\ext4.vhdx"
+attach vdisk readonly
+compact vdisk
+detach vdisk
+exit
+```
+Typically reclaims 5-15 GB on a heavily-used WSL2 install.
+
+#### Optional: Move Ollama models to a different drive
+
+Important: since Ollama runs as a systemd service, you MUST set `OLLAMA_MODELS` in the service environment, not just in your shell. (Setting it only in `~/.bashrc` won't change anything because the service ignores your shell.)
+
+```bash
+# 1. Make a target dir on a Windows drive (mounted at /mnt/d/ in WSL):
+sudo mkdir -p /mnt/d/ollama-models
+sudo chown ollama:ollama /mnt/d/ollama-models   # service user must own it
+
+# 2. Edit the systemd service to set the env var:
+sudo systemctl edit ollama
+# In the editor that opens, add these lines and save:
+#   [Service]
+#   Environment="OLLAMA_MODELS=/mnt/d/ollama-models"
+
+# 3. Migrate existing models (service must be stopped first):
+sudo systemctl stop ollama
+sudo mv /usr/share/ollama/.ollama/models/* /mnt/d/ollama-models/
+sudo systemctl start ollama
+
+# 4. Verify:
+ollama list
+sudo du -sh /mnt/d/ollama-models/
+```
+
+⚠ **Trade-off:** `/mnt/d/...` paths go through the WSL2↔Windows 9P protocol bridge — slower model loading (~1-2 sec extra to read GBs from disk into VRAM). For frequent-use models, keep them inside WSL2 (`/usr/share/ollama/.ollama/`). External-drive offload only makes sense for archival models you rarely load.
+
+#### 🔐 Privacy reminder for shared/office laptops
+
+`~/.ollama/id_ed25519` and `id_ed25519.pub` are your unique Ollama push identity. Auto-generated on install; used if you ever push a custom model to ollama.com. **Never commit/share these.** Your `.gitignore` already excludes `.ollama/`.
+
+#### Quick reference: clean up models
+
+```bash
+ollama rm llama3.1:8b         # remove a specific model
+ollama list                   # confirm it's gone
+du -sh ~/.ollama/             # space freed (Ollama auto-prunes orphan blobs)
+```
 
 ### Phase 12: The 5 Ways to Interact With Ollama
 
@@ -533,26 +704,36 @@ curl -s "https://huggingface.co/api/models?search=qwen+gguf&limit=20" | jq -r '.
 
 ### Phase 15: Disk Hygiene as You Try More Models
 
-Models pile up fast. A few maintenance commands:
+Models pile up fast — see also Phase 11's deep dive on storage layout. Quick maintenance commands:
 
 ```bash
-# List with sizes:
+# List with reported sizes:
 ollama list
 
-# Total disk used:
-du -sh ~/.ollama/models/
+# Total disk used (post-deduplication) — note: models live under the service user!
+sudo du -sh /usr/share/ollama/.ollama/
 
-# See blob storage details (largest first):
-du -h ~/.ollama/models/blobs/ | sort -hr | head
+# Largest blobs (these are model weights):
+sudo du -h /usr/share/ollama/.ollama/models/blobs/* | sort -hr | head
 
-# Remove a model:
+# Free space remaining in WSL2:
+df -h ~
+
+# Remove a model (auto-prunes orphan blobs):
 ollama rm llama3.2:3b
 
-# Remove ALL models (drastic — only if you want to start fresh):
-rm -rf ~/.ollama/models/blobs/* ~/.ollama/models/manifests/*
+# Nuclear: remove ALL models (only if starting fresh):
+ollama list | tail -n +2 | awk '{print $1}' | xargs -r ollama rm
 ```
 
-**Reality:** by Month 3 you'll easily have 50-100 GB of models. Budget 200 GB+ free disk space for serious local AI work.
+**Reality on a 6 GB GPU laptop:**
+- Each 7-8B Q4_K_M model = ~4.5 GB
+- Each 3B Q4_K_M = ~2 GB
+- After Week 2 you'll easily have 6-8 models = 25-35 GB
+- By Month 3 you'll have 50-100 GB
+- **Budget at least 200 GB free disk space for serious local AI work**
+
+If your Windows C: drive is tight, see Phase 11 → "Optional: Move Ollama models to a different drive" for the `OLLAMA_MODELS` environment variable approach. And remember: WSL2's vhdx file doesn't auto-shrink — see Phase 11 → "WSL2 Disk Trap" for the `diskpart compact` reclaim procedure.
 
 ---
 
@@ -575,12 +756,14 @@ rm -rf ~/.ollama/models/blobs/* ~/.ollama/models/manifests/*
 2. **Ollama auto-detected my GPU.** No manual CUDA path configuration needed. The CUDA toolkit install in Day 0a was enough.
 3. **Systemd service runs Ollama automatically** in the background after install. No need to `ollama serve` manually unless I want to see logs in foreground.
 4. **3B models are FAST on 6 GB VRAM.** Way more responsive than I expected — feels close to ChatGPT for short responses.
-5. **First download is the slowest step.** Subsequent runs of the same model are instant (cached in `~/.ollama/models/`).
+5. **First download is the slowest step.** Subsequent runs of the same model are instant (cached on disk).
 6. **Llama 3.2 vs Qwen 2.5 personalities are different.** Llama tends to add more "helpful assistant" framing; Qwen feels more direct and concise. Both are valid for different use cases.
 7. **The "offline" property is real.** Disconnected WiFi, generated answers normally. Local AI delivers on its core promise from day one.
 8. **OpenAI-compatible endpoint = drop-in migration.** Any tool/library expecting OpenAI's API can hit Ollama by just changing `base_url`. This is why the whole open-source ecosystem (LangChain, LlamaIndex, Continue.dev, etc.) "just works" with local models.
 9. **`/bye` doesn't free VRAM — keep-alive does.** The chat client exits but the server keeps the model loaded in VRAM for 5 min by default. This is a feature (warm starts), but on 6 GB VRAM I need to manage it: `ollama stop <model>` to force-unload, or set `OLLAMA_KEEP_ALIVE=0` to never cache. Check `ollama ps` to see the countdown.
 10. **No `ollama search` exists yet — use the website + HF.** Browse https://ollama.com/library, or use the `hf.co/<user>/<repo>:<quant>` syntax to pull ANY GGUF from HuggingFace directly. This unlocks 50,000+ community models vs ~100 in the Ollama Library. `bartowski/*` is the most trusted GGUF uploader on HF.
+11. **Models live in `/usr/share/ollama/.ollama/`, NOT `~/.ollama/`.** This caught me off guard — `du -sh ~/.ollama/` showed only 16 KB. The real models are owned by the `ollama` system user (created by the install script for the systemd service). Inspect with `sudo du -sh /usr/share/ollama/.ollama/`. Your `~/.ollama/` is just client state (push identity keys + CLI history). This is privilege-separated client/server architecture, similar to Docker.
+12. **`OLLAMA_MODELS` must be set in the systemd service, not your shell.** Setting it in `~/.bashrc` does nothing because the service runs under a different user that doesn't read your bashrc. Use `sudo systemctl edit ollama` and add `Environment="OLLAMA_MODELS=/path/..."` to the override file.
 
 ---
 
@@ -597,6 +780,8 @@ rm -rf ~/.ollama/models/blobs/* ~/.ollama/models/manifests/*
 | VRAM stays used after exiting chat (`/bye`) | Normal — keep-alive default is 5 min. Force unload: `ollama stop <model>` or set `OLLAMA_KEEP_ALIVE=0` env var |
 | `ollama stop` not recognized | Older Ollama version. Use API: `curl http://localhost:11434/api/generate -d '{"model":"...","keep_alive":0}'` |
 | Model takes 5 sec to start every time | Add `OLLAMA_KEEP_ALIVE=-1` to keep it warm (saves load time, uses VRAM continuously) |
+| `~/.ollama/models/` doesn't exist or is empty | Expected. Linux installer runs Ollama as a service user — models are at `/usr/share/ollama/.ollama/models/`. Use `sudo` to inspect. |
+| `OLLAMA_MODELS` set in shell but service ignores it | The service runs as `ollama` user and doesn't read your shell. Set via `sudo systemctl edit ollama` instead. |
 
 ---
 
