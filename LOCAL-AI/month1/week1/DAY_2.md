@@ -1,4 +1,4 @@
-# Week 1, Day 2 — VRAM Reality Check + Driving Ollama from Python
+# Week 1, Day 2 — VRAM Reality Check + Driving Ollama from Python ✅ COMPLETE
 
 > **Goal:** Push your 6 GB VRAM by trying the 8B tier (Llama 3.1 8B, Qwen 2.5 7B), observe what happens when models barely fit (and when they don't), measure tokens/sec rigorously across model sizes, then graduate from CLI chat to **driving Ollama programmatically from Python**.
 >
@@ -8,22 +8,45 @@
 
 ---
 
+## ✅ DAY 2 COMPLETE — What I Learned (measured on RTX 1000 Ada, 6 GB)
+
+**Benchmarked TPS (warm medians, my hardware):**
+| Model | Fits 6 GB? | Warm TPS | Verdict |
+|---|---|---|---|
+| `qwen2.5:3b` | ✅ 100% GPU (even @16K ctx) | ~63 | best for long context / speed |
+| `llama3.2:3b` | ✅ 100% GPU | ~56 | fast iteration |
+| `qwen2.5:7b` | ✅ 100% GPU | ~32.5 | **best 7B daily driver (fits + fastest 7B)** |
+| `llama3.1:8b` (Q4_K_M) | ⚠ 7% CPU offload | ~25.4 | best answer quality, accept the tax |
+
+**Big lessons that stuck:**
+1. **Decode is memory-bandwidth-bound.** TPS ≈ 192 GB/s ÷ model_VRAM × ~83% efficiency — predicted my numbers within 5%.
+2. **"Same tier" ≠ "same fit":** Qwen 2.5 7B fits 100% GPU (4.9 GB) but Llama 3.1 8B offloads (5.9 GB) — fewer layers + fewer KV heads. Always check `ollama ps`.
+3. **Partial offload is non-linear:** ≤15% offload is nearly free; 30%+ is a cliff (8B: 24→10 TPS from 4K→16K ctx).
+4. **`num_ctx` is free when you have VRAM headroom:** 3B held 16K context at 100% GPU and full speed; 8B cratered.
+5. **Cold single-run TPS lies:** warmup more than DOUBLED Qwen's number (15.1 → 32.5). Always benchmark with warmup + fixed `num_predict`/`seed` + median.
+6. **Ollama is client/server:** an always-on systemd service (`ollama serve`) on `localhost:11434`; CLI, `curl`, and Python are all just clients. Inference is 100% offline (loopback never hits the network).
+7. **5 ways to drive Ollama:** CLI, one-shot, REST API (`curl`), Python `ollama` lib, and the OpenAI-compatible endpoint.
+
+**Artifacts I built:** `benchmark.sh`, `benchmark_ctx.sh`, `01_basic_chat.py`, `02_streaming_chat.py`, `03_raw_api.py`, `04_openai_compat.py`, `05_compare_models.py` — all in `~/local-ai/scripts/`.
+
+---
+
 ## 📋 Today's Checklist
 
-- [ ] Pull Llama 3.1 8B Instruct Q4_K_M (~4.7 GB)
-- [ ] Measure peak VRAM with `nvidia-smi` while loaded
-- [ ] Benchmark TTFT (time-to-first-token) and TPS (tokens-per-second) on Llama 3.1 8B
-- [ ] Compare 7-8B models head-to-head: Llama 3.1 8B vs Qwen 2.5 7B (both already downloaded)
-- [ ] Force heavier partial CPU offload by cranking `num_ctx` on Llama 3.1 8B — observe the speed cliff
-- [ ] Compare same model at TWO quants you already have: Llama 3.1 8B Q4_K_M vs Q4_K_S — VRAM + speed + quality
-- [ ] Compute the VRAM math by hand for one model and validate against measured VRAM
-- [ ] Install Python `ollama` library in your venv
-- [ ] Write your first Python script that calls Ollama
-- [ ] Write a streaming Python script (tokens print as generated)
-- [ ] Hit the REST API directly with `curl` (no library)
-- [ ] Test the OpenAI-compatible endpoint from Python
-- [ ] Build a small **"compare 3 models on the same prompt"** Python utility
-- [ ] Save all scripts to `~/local-ai/scripts/` so you can re-use them
+- [x] Pull Llama 3.1 8B Instruct Q4_K_M (~4.7 GB)
+- [x] Measure peak VRAM with `nvidia-smi` while loaded
+- [x] Benchmark TTFT (time-to-first-token) and TPS (tokens-per-second) on Llama 3.1 8B
+- [x] Compare 7-8B models head-to-head: Llama 3.1 8B vs Qwen 2.5 7B (both already downloaded)
+- [x] Force heavier partial CPU offload by cranking `num_ctx` on Llama 3.1 8B — observe the speed cliff
+- [x] Compare same model at TWO quants you already have: Llama 3.1 8B Q4_K_M vs Q4_K_S — VRAM + speed + quality
+- [x] Compute the VRAM math by hand for one model and validate against measured VRAM
+- [x] Install Python `ollama` library in your venv
+- [x] Write your first Python script that calls Ollama
+- [x] Write a streaming Python script (tokens print as generated)
+- [x] Hit the REST API directly with `curl` (no library)
+- [x] Test the OpenAI-compatible endpoint from Python
+- [x] Build a small **"compare 3 models on the same prompt"** Python utility
+- [x] Save all scripts to `~/local-ai/scripts/` so you can re-use them
 
 ---
 
@@ -675,6 +698,21 @@ The non-linear knee holds: 4K→8K (7%→15% offload) costs only ~15%, but 8K→
 
 > 🌡 **Thermal wrinkle:** warm 16K here (10.3) came out *lower* than the earlier no-warmup batch 16K (~14.7) — backwards from the usual warmup-helps rule. Likely **thermal throttling**: `benchmark_ctx.sh` runs ~18 inferences before reaching 16K, and 16K leans hardest on the CPU (33% offload), so heat soak → CPU clocks down → the CPU-heavy case takes the biggest hit. The quick one-shot loop ran 16K only once (less heat soak) so it dodged the throttle. **Lesson: sustained-load steady-state TPS can be *lower* than burst TPS, especially for CPU-offloaded models. Burst benchmarks are optimistic for anything leaning on the CPU.**
 
+#### Contrast: a model with VRAM headroom (`qwen2.5:3b`) doesn't degrade at all ⭐
+
+Same sweep, but on a 3B model that never offloads — `~/local-ai/scripts/benchmark_ctx.sh qwen2.5:3b`:
+| num_ctx | SIZE | Processor split | TPS (warm median) | vs 4K |
+|---|---|---|---|---|
+| 4096 | 2.4 GB | **100% GPU** | **62.5** | baseline |
+| 8192 | 2.5 GB | **100% GPU** | **63.6** | +2% |
+| 16384 | 3.1 GB | **100% GPU** | **65.4** | +5% |
+
+Night-and-day difference vs the 8B:
+- **Stays 100% GPU at every context** — even 16K only reaches 3.1 GB, comfortably under the ~5.3 GB ceiling. No offload → no cliff.
+- **TPS is flat (~63), even drifting *up* slightly.** Why up? With a short real sequence (~110 tokens), the KV-cache *read* per token is tiny regardless of the num_ctx *allocation*, so context size barely affects decode; the small upward drift is just GPU clocks warming over the sweep (16K ran last = hottest boost clocks).
+
+**The lesson that ties Phase 6 together:** `num_ctx` only hurts speed when it pushes you *into* (or deeper into) CPU offload. If you have VRAM headroom — i.e., a model small enough to stay 100% GPU — you can **crank context for free.** So on 6 GB: want long context? Use a 3B model and enjoy 16K at full speed. Want an 8B model? Keep context small or pay the offload cliff. This is the single most actionable rule from today's benchmarking.
+
 **This is partial offload in action.** As `num_ctx` rises:
 - SIZE in `ollama ps` grows (KV cache *allocation* inflating: ~0.5 GB → 1 GB → 2 GB)
 - CPU% in the processor split climbs deterministically (more layers spilled to RAM)
@@ -761,8 +799,14 @@ Open VS Code with the WSL workspace (or a terminal). Make sure your venv is acti
 ```bash
 cd ~/local-ai
 source .venv/bin/activate    # prompt should show (.venv)
-uv pip install ollama
+# Install ALL the Python libs today's scripts use, in one go:
+#   ollama   → Phases 9-10, 13 (the ollama library)
+#   requests → Phase 11 (raw HTTP, 03_raw_api.py)
+#   openai   → Phase 12 (OpenAI-compatible client, 04_openai_compat.py)
+uv pip install ollama requests openai
 ```
+
+> 💡 venvs are isolated — only packages you explicitly install are available. Installing `ollama` does NOT pull in `requests` (the `ollama` lib uses `httpx` internally). If you skip one and a later script does `import requests` / `import openai`, you'll get `ModuleNotFoundError`. Installing all three now avoids that. (Tip: `uv pip freeze > requirements.txt` to snapshot your env so you can recreate it later.)
 
 Create a scripts directory:
 ```bash
@@ -823,6 +867,33 @@ python 02_streaming_chat.py
 Notice how text appears word-by-word. This is the same experience as the `>>>` prompt, but in Python — meaning you can embed it in any app.
 
 ### Phase 10b: Tour ALL 11 Endpoints with `curl` (the "everything is HTTP" lesson)
+
+#### Background: what server am I even talking to? (the `localhost:11434` story)
+
+If you're wondering "when did I start a server on port 11434?" — **you didn't, the Day 1 installer did.** The Ollama Linux install script created a **systemd service** (`ollama.service`) that runs `ollama serve` in the background, binds to `127.0.0.1:11434`, and stays up 24/7 (auto-starts on boot, auto-restarts on crash). Everything — the `ollama` CLI *and* your `curl`/Python — are just **clients** hitting that one always-on server.
+
+```
+        ollama serve  ← the SERVER (started by systemd at install/boot)
+        listens on 127.0.0.1:11434, loads models, runs inference
+                          ▲  HTTP
+        ┌─────────────────┼──────────────────┐
+   ollama run/list/ps   curl localhost:11434   your Python .py files
+        └──────────── all CLIENTS ─────────────┘
+```
+
+That's *why* `curl localhost:11434/api/tags` returns the same data as `ollama list` — same server, the CLI just formats the JSON as a table.
+
+Inspect the server yourself:
+```bash
+systemctl status ollama                 # Active (running) since <when> = when it started
+systemctl is-enabled ollama             # "enabled" = starts on every boot
+ss -tlnp | grep 11434                    # the process holding port 11434 open
+systemctl show ollama --property=ActiveEnterTimestamp   # exact last-start time
+```
+
+Decoding the address:
+- **`localhost` / `127.0.0.1`** = loopback — only *your* machine can reach it (other computers can't, by default). Safe default, good for an office laptop.
+- **`11434`** = Ollama's default port (a "door" the server process holds open). Change it with `OLLAMA_HOST` (e.g. `OLLAMA_HOST=0.0.0.0:11434` exposes it to your whole network — avoid that on the office laptop unless intended).
 
 Before going to Python, prove to yourself that **every CLI action is just an HTTP call**. Install `jq` for pretty JSON output:
 
@@ -903,6 +974,8 @@ curl -s http://localhost:11434/api/tags | jq   # raw JSON
 
 Save as `~/local-ai/scripts/03_raw_api.py`:
 
+> Needs the `requests` library. If you get `ModuleNotFoundError: No module named 'requests'`, you skipped it in Phase 8 — just run `uv pip install requests` (with the venv active) and re-run.
+
 ```python
 """Hit Ollama's REST API directly with requests — no ollama library."""
 import requests
@@ -927,6 +1000,8 @@ python 03_raw_api.py
 ```
 
 **Why bother with raw requests?** When debugging weird issues, you can see exactly what's on the wire. Also useful in languages without an `ollama` library (Go, Rust, Java, etc. — all can hit this endpoint).
+
+> 🔌 **Does hitting the API need internet? No.** `http://localhost:11434` goes over the **loopback interface** (`127.0.0.1`) — a virtual network *inside* your OS. The request never touches WiFi/Ethernet, never reaches a router, never leaves the laptop. It's just two local processes (your script ↔ `ollama serve`) talking over TCP; weights are on local disk; inference is on your local GPU. **Proof: turn off WiFi and `python 03_raw_api.py` runs identically.** The ONLY things needing internet are `ollama pull` (download a model), Ollama updates, and the one-time `pip install`. "REST API" / "HTTP" *sound* cloudy, but they're just protocols that work fine entirely locally. Rule of thumb: if the URL is `localhost`/`127.0.0.1`, it's airtight-local; if you ever see a real domain (e.g. `api.openai.com`), *that's* when traffic leaves your machine.
 
 ### Phase 12: OpenAI-Compatible Endpoint
 
@@ -1025,7 +1100,9 @@ These are the **5 models I have on disk** (no more downloads). This table is my 
 | Model | Quant | Disk size | Peak VRAM | Processor split | TPS (decode) | Subjective quality |
 |---|---|---|---|---|---|---|
 | **Llama 3.2 3B @ ctx=4096** ✅ | Q4_K_M | 2.0 GB | ~3 GB | **100% GPU** | **~56 tok/s** | 7/10 |
-| Qwen 2.5 3B @ ctx=4096 | Q4_K_M | 1.9 GB | ~3 GB | (expect 100% GPU) | __ tok/s | __ /10 |
+| **Qwen 2.5 3B @ ctx=4096** ✅ | Q4_K_M | 1.9 GB | **2.4 GB** | **100% GPU** | **62.5 tok/s** | __ /10 |
+| **Qwen 2.5 3B @ ctx=8192** ✅ | Q4_K_M | 1.9 GB | **2.5 GB** | **100% GPU** | **63.6 tok/s** | __ /10 |
+| **Qwen 2.5 3B @ ctx=16384** ✅ | Q4_K_M | 1.9 GB | **3.1 GB** | **100% GPU** | **65.4 tok/s** | __ /10 |
 | **Qwen 2.5 7B @ ctx=4096** ✅ | Q4_K_M | 4.7 GB | **4.9 GB** | **100% GPU (fits!)** | **32.5 tok/s (warm median)** | 8/10 |
 | **Llama 3.1 8B @ ctx=4096** ⚠ | Q4_K_M | 4.9 GB | **5.9 GB** | **7%/93% CPU/GPU** | **25.4 tok/s (warm median)** | 9/10 |
 | **Llama 3.1 8B @ ctx=2048** ⚠ | Q4_K_M | 4.9 GB | **5.6 GB** | **8%/92% CPU/GPU (still partial)** | **~21 tok/s (no gain)** | 9/10 |
@@ -1090,6 +1167,8 @@ If way off: probably forgot KV-cache scales with context length — check `num_c
 18. **Cold-load penalty is real and separate from decode speed.** First request after a model loads: `total_duration` includes ~8-10s to read the weights from disk into VRAM (measured 14.08s total vs 4.23s decode for cold Llama 3.1 8B). Subsequent requests are warm (keep-alive) and `total_duration` drops to ~decode time. Never benchmark the first (cold) run.
 19. **PCIe bandwidth is NOT the bottleneck in CPU offload (common misconception).** The CPU-offloaded layers keep their weights in system RAM and are *computed by the CPU* — weights do not stream across PCIe per token. Only the hidden-state activation vector (~8 KB) crosses the bus per token (~1 µs, negligible). The real cost is **CPU RAM bandwidth (~60 GB/s) + AVX compute**, which is ~3-5× slower than a GPU layer (VRAM ~192 GB/s). This is why offloading a *few* layers barely hurts but offloading *many* falls off a cliff.
 20. **num_ctx inflates VRAM by *allocation*, not by per-token read cost (for short prompts).** Going 4K→8K→16K grew SIZE 5.9→6.4→8.0 GB because Ollama pre-allocates the full KV-cache buffer. But with only ~110 tokens of real context, the KV *read* per token is tiny regardless. So large num_ctx hurts purely by evicting model layers to CPU — a second-order effect, not a direct attention-cost effect, until you actually fill the context.
+21. **With VRAM headroom, context is FREE — proven by contrast.** Same context sweep on `qwen2.5:3b`: 4K/8K/16K all stayed **100% GPU** (2.4→2.5→3.1 GB) with flat TPS (62.5→63.6→65.4, even drifting up from clock warming). The 8B cratered (24→10) over the same sweep because it offloaded; the 3B didn't move because it never left the GPU. **Actionable rule: `num_ctx` only costs speed when it pushes you into CPU offload. Want long context on 6 GB? Use a 3B model and crank it. Want an 8B? Keep context small or pay the cliff.**
+22. **I never "started a server" — the installer did.** `curl localhost:11434` works because the Day 1 install script created a systemd service (`ollama.service`) running `ollama serve`, bound to `127.0.0.1:11434`, up 24/7 (auto-start on boot, auto-restart on crash). The CLI, curl, and my future Python scripts are all just **clients** of that one always-on server. `localhost` = loopback (only my machine can reach it — safe default); `11434` = Ollama's default port. Inspect with `systemctl status ollama` and `ss -tlnp | grep 11434`.
 
 ---
 
@@ -1101,6 +1180,7 @@ If way off: probably forgot KV-cache scales with context length — check `num_c
 | 8B model loads but slow (~20 tok/s instead of expected 30+) | Partial CPU offload (`X%/Y% CPU/GPU` in `ollama ps`) | Try `num_ctx: 2048`; if still partial, switch to Q4_K_S or smaller model |
 | TPS varies wildly between runs (e.g. 11-25 TPS) | Cold start + output variance + CPU offload jitter | Use the proper benchmark script with warmup + fixed `num_predict` + median |
 | Same model, different TPS for different prompts | KV cache scales with prompt+output length | Expected. Compare with same prompt+`num_predict`+`seed` |
+| `ModuleNotFoundError: No module named 'requests'` / `'ollama'` / `'openai'` | Package not installed in this venv (venvs are isolated; installing one lib doesn't add others) | Activate venv, then `uv pip install ollama requests openai` |
 | `import ollama` fails | Not in venv, or package not installed | `source ~/local-ai/.venv/bin/activate && uv pip install ollama` |
 | `Connection refused` from Python | Ollama service stopped | `sudo systemctl status ollama`; restart if not running |
 | Streaming chunks come as bytes not strings | API returning raw bytes | Use `ollama` library (handles this); or `chunk.decode('utf-8')` with raw requests |
@@ -1111,19 +1191,19 @@ If way off: probably forgot KV-cache scales with context length — check `num_c
 
 ## ✅ Done When
 
-- [ ] You measured TTFT and TPS for at least 3 different models (3B, 7B, 8B tier) — all from your existing 5
-- [ ] You watched VRAM in real time as a model loaded (saw the jump on `nvidia-smi`)
-- [ ] You observed partial CPU offload and watched it grow by cranking `num_ctx` on Llama 3.1 8B (4K → 8K → 16K)
-- [ ] You compared two quants of the same model (Llama 3.1 8B Q4_K_M vs Q4_K_S)
-- [ ] You wrote and ran a Python script (`01_basic_chat.py`) that calls Ollama
-- [ ] You wrote a streaming script (`02_streaming_chat.py`) — tokens appear live
-- [ ] You hit the REST API with raw `requests` once
-- [ ] You used the OpenAI-compatible endpoint from Python
-- [ ] You built and used a compare-models utility (`05_compare_models.py`)
-- [ ] Your VRAM math estimate is within ~0.5 GB of measured VRAM for one model
-- [ ] All scripts saved in `~/local-ai/scripts/` (version-controllable)
-- [ ] You called at least 5 different API endpoints with raw `curl` from the shell
-- [ ] You understand that `ollama list`, `ollama run X`, `ollama pull X`, etc. are just CLI shortcuts for HTTP calls
+- [x] You measured TTFT and TPS for at least 3 different models (3B, 7B, 8B tier) — all from your existing 5
+- [x] You watched VRAM in real time as a model loaded (saw the jump on `nvidia-smi`)
+- [x] You observed partial CPU offload and watched it grow by cranking `num_ctx` on Llama 3.1 8B (4K → 8K → 16K)
+- [x] You compared two quants of the same model (Llama 3.1 8B Q4_K_M vs Q4_K_S)
+- [x] You wrote and ran a Python script (`01_basic_chat.py`) that calls Ollama
+- [x] You wrote a streaming script (`02_streaming_chat.py`) — tokens appear live
+- [x] You hit the REST API with raw `requests` once
+- [x] You used the OpenAI-compatible endpoint from Python
+- [x] You built and used a compare-models utility (`05_compare_models.py`)
+- [x] Your VRAM math estimate is within ~0.5 GB of measured VRAM for one model
+- [x] All scripts saved in `~/local-ai/scripts/` (version-controllable)
+- [x] You called at least 5 different API endpoints with raw `curl` from the shell
+- [x] You understand that `ollama list`, `ollama run X`, `ollama pull X`, etc. are just CLI shortcuts for HTTP calls
 
 ---
 
@@ -1202,7 +1282,7 @@ If way off: probably forgot KV-cache scales with context length — check `num_c
 | Model | Fits? | Warm TPS | Use for |
 |---|---|---|---|
 | `llama3.2:3b` | ✅ 100% GPU | ~56 | fast iteration, agents, RAG dev |
-| `qwen2.5:3b` | ✅ 100% GPU | (bench it) | fast, multilingual |
+| `qwen2.5:3b` | ✅ 100% GPU (even @16K) | ~63 | fast, multilingual, **long-context on 6 GB** |
 | `qwen2.5:7b` | ✅ 100% GPU | ~32.5 | **best 7B daily driver** |
 | `llama3.1:8b` (Q4_K_M) | ⚠ 7% CPU offload | ~25 | best quality, accept the offload |
 | `llama3.1:8b-instruct-q4_K_S` | ? (Phase 7 — bench it) | ? | lighter-quant test |
