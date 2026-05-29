@@ -782,6 +782,65 @@ If your Windows C: drive is tight, see Phase 11 → "Optional: Move Ollama model
 | Model takes 5 sec to start every time | Add `OLLAMA_KEEP_ALIVE=-1` to keep it warm (saves load time, uses VRAM continuously) |
 | `~/.ollama/models/` doesn't exist or is empty | Expected. Linux installer runs Ollama as a service user — models are at `/usr/share/ollama/.ollama/models/`. Use `sudo` to inspect. |
 | `OLLAMA_MODELS` set in shell but service ignores it | The service runs as `ollama` user and doesn't read your shell. Set via `sudo systemctl edit ollama` instead. |
+| `Error: context deadline exceeded` on `ollama pull` | Network timeout reaching the registry. Retry first; then fix WSL2 DNS, `wsl --shutdown`, or set VPN proxy/MTU. See "Pull errors: network & corporate networks" below. |
+
+---
+
+### Pull errors: network & corporate networks (`context deadline exceeded`)
+
+`context deadline exceeded` = a Go timeout. When it appears right after `pulling manifest`, Ollama could not reach `registry.ollama.ai` over HTTPS in time. It is a **network** problem, not a model or Ollama-binary problem. On WSL2 + corporate laptop the usual causes are stale WSL DNS, the company VPN/proxy, or a transient slow registry.
+
+**Diagnose first (run top to bottom):**
+```bash
+ping -c 3 8.8.8.8                      # raw internet (no DNS)
+ping -c 3 google.com                   # DNS resolution
+curl -I https://registry.ollama.ai     # reach the Ollama registry directly
+```
+- `8.8.8.8` OK but `google.com` fails → DNS problem (Fix B)
+- both pings fail → no network / VPN blocking (Fix C/D)
+- pings OK but curl hangs → proxy/firewall or transient registry (Fix D / retry)
+
+**Fix A — Retry (pulls are resumable).** Manifest timeouts are often transient; re-run 2-3×:
+```bash
+ollama pull qwen2.5:7b
+```
+
+**Fix B — Repair WSL2 DNS** (common after VPN toggle or sleep):
+```bash
+cat /etc/resolv.conf
+echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf   # quick test
+```
+Make permanent so WSL stops overwriting it:
+```bash
+sudo tee /etc/wsl.conf >/dev/null <<'EOF'
+[network]
+generateResolvConf = false
+EOF
+# then from PowerShell:  wsl --shutdown   (reopen Ubuntu after)
+```
+
+**Fix C — Restart WSL networking** (from PowerShell): `wsl --shutdown`, wait ~10s, reopen. Rebuilds the virtual NIC and clears stale DNS/routes.
+
+**Fix D — Corporate VPN / proxy:**
+```bash
+# (i) Proxy required — tell the Ollama service, not just the shell:
+sudo systemctl edit ollama
+#   [Service]
+#   Environment="HTTPS_PROXY=http://<proxy-host>:<port>"
+#   Environment="HTTP_PROXY=http://<proxy-host>:<port>"
+sudo systemctl restart ollama
+
+# (ii) MTU mismatch (VPN tunnels use smaller MTU; large pulls stall):
+ip link show eth0 | grep mtu
+sudo ip link set dev eth0 mtu 1350
+```
+
+**Fix E — Restart Ollama service:** `sudo systemctl restart ollama`
+
+**Fallback — pull from Hugging Face** (different CDN, often friendlier on corp networks):
+```bash
+ollama pull hf.co/bartowski/Qwen2.5-7B-Instruct-GGUF:Q4_K_M
+```
 
 ---
 
