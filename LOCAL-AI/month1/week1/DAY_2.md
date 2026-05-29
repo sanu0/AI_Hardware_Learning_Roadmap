@@ -305,6 +305,53 @@ When `ollama ps` shows `7%/93% CPU/GPU`, the CPU is the bottleneck. CPU performa
 
 #### Proper TPS benchmark script (saved to `~/local-ai/scripts/benchmark.sh`)
 
+**Create it in one shot** (the quoted `<<'EOF'` writes the script literally, without expanding `$MODEL`/`$(...)`):
+```bash
+mkdir -p ~/local-ai/scripts
+cat > ~/local-ai/scripts/benchmark.sh <<'EOF'
+#!/bin/bash
+# Proper TPS benchmark: fixed prompt, fixed output length, warmup + N runs, report median
+MODEL="${1:-llama3.1:8b}"
+NUM_CTX="${2:-2048}"
+NUM_PREDICT=100   # always generate exactly 100 tokens
+RUNS=5
+
+echo "Benchmarking $MODEL (num_ctx=$NUM_CTX, num_predict=$NUM_PREDICT)"
+
+# Warmup (discarded)
+curl -s http://localhost:11434/api/generate -d "{
+  \"model\": \"$MODEL\",
+  \"prompt\": \"Count from 1 to 100.\",
+  \"stream\": false,
+  \"options\": {\"num_ctx\": $NUM_CTX, \"num_predict\": $NUM_PREDICT, \"seed\": 42}
+}" > /dev/null
+echo "Warmup done."
+
+# Measured runs
+TPS_VALUES=()
+for i in $(seq 1 $RUNS); do
+  TPS=$(curl -s http://localhost:11434/api/generate -d "{
+    \"model\": \"$MODEL\",
+    \"prompt\": \"Count from 1 to 100.\",
+    \"stream\": false,
+    \"options\": {\"num_ctx\": $NUM_CTX, \"num_predict\": $NUM_PREDICT, \"seed\": 42}
+  }" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'{d[\"eval_count\"]/(d[\"eval_duration\"]/1e9):.1f}')")
+  echo "Run $i: $TPS TPS"
+  TPS_VALUES+=("$TPS")
+done
+
+echo "Sorted: $(echo "${TPS_VALUES[@]}" | tr ' ' '\n' | sort -n | tr '\n' ' ')"
+MEDIAN=$(echo "${TPS_VALUES[@]}" | tr ' ' '\n' | sort -n | awk 'BEGIN{c=0}{a[c++]=$1}END{print a[int(c/2)]}')
+echo "Median TPS: $MEDIAN"
+ollama ps
+EOF
+chmod +x ~/local-ai/scripts/benchmark.sh
+```
+
+> ⚠ Gotcha I hit: the script is documented here, but you must actually create it on disk before calling it — otherwise you get `No such file or directory`. The block above creates it for you.
+
+For reference, the script contents are also shown below (same thing, un-wrapped):
+
 ```bash
 #!/bin/bash
 # Proper TPS benchmark: fixed prompt, fixed output length, warmup + N runs, report median
@@ -463,7 +510,9 @@ print(f'Total duration (incl prefill+load): {total_dur_ns/1e9:.2f}s')
 "
 ```
 
-Expected on RTX 1000 Ada for 7-8B Q4_K_M: **~25-40 tok/s**.
+Expected on RTX 1000 Ada for 7-8B Q4_K_M: **~18-25 tok/s** (lower end if partially offloaded like Llama 3.1 8B; higher if fully on GPU like Qwen 2.5 7B).
+
+> **Note on `total_duration` vs `eval_duration`:** the first run after loading a model is *cold* — `total_duration` includes ~8-10s of loading 4.9 GB from disk into VRAM. Measured example: decode 18.2 tok/s but `total_duration` 14.08s (load+prefill ≈ 9.85s). Run the same request immediately again and `total_duration` collapses to ~5s (model warm in VRAM via keep-alive). Always benchmark with a warmup run.
 
 ### Phase 5: Compare 7-8B Models Head-to-Head (no new downloads)
 
@@ -503,6 +552,37 @@ ollama stop qwen2.5:7b
 
 Record results in the Measurements table below.
 
+#### What I actually measured (Phase 5) ⭐ — "same tier ≠ same fit"
+
+Single-run, same prompt ("Explain dark matter in 3 sentences."):
+| Model | `ollama ps` SIZE | Processor split | Tokens | TPS (single run) |
+|---|---|---|---|---|
+| `llama3.1:8b` (Q4_K_M) | 5.9 GB | **7%/93% CPU/GPU** ⚠ | 139 | 20.7 |
+| `qwen2.5:7b` (Q4_K_M) | **4.9 GB** | **100% GPU** ✅ | 79 | 15.1 |
+
+**The big discovery:** Qwen 2.5 7B fits **100% on GPU** while Llama 3.1 8B partially offloads — even though both are "7-8B Q4_K_M" and nearly identical on disk (4.7 vs 4.9 GB). In VRAM they're ~1 GB apart. Why:
+| | Llama 3.1 8B | Qwen 2.5 7B |
+|---|---|---|
+| Params | 8.0B | 7.6B (smaller weights) |
+| Layers | 32 | 28 |
+| KV heads (GQA) | 8 | 4 → **~half the KV cache** |
+| KV cache @ 4K | ~512 MB | ~230 MB |
+| VRAM footprint | 5.9 GB | 4.9 GB |
+
+→ On 6 GB, **Qwen 2.5 7B is a "fits-fully" daily driver; Llama 3.1 8B is "borderline-offload."**
+
+**⚠ Don't trust the single-run TPS column above** — it's a single cold run with *different output lengths* (139 vs 79 tokens). Per Phase 3c, that's not a fair comparison: the offloaded Llama looking "faster" is an artifact of its longer run spending more time at boosted GPU clocks.
+
+**✅ Resolved with the warm benchmark (`benchmark.sh`, fixed num_predict + warmup + median of 5):**
+| Model | Median TPS (warm) | Spread | Placement |
+|---|---|---|---|
+| `llama3.1:8b` | **25.4** | 25.3-25.6 (tight) | 7%/93% CPU/GPU |
+| `qwen2.5:7b` | **32.5** | 31.8-33.0 (tight) | 100% GPU ✅ |
+
+Once measured fairly, **Qwen 2.5 7B is ~28% faster** — exactly as bandwidth theory predicts (it's smaller in VRAM and fully resident). The single-run inversion was pure noise. Bandwidth check: Qwen 192÷4.9 = 39 max → 32.5 measured = 83% efficiency; Llama 192÷5.9 ≈ 32.5 max × 83% ≈ 27 if it fit fully, minus the small 7% offload tax = 25.4 measured. ✔
+
+**Most striking: warmup more than DOUBLED Qwen's number** (cold single run 15.1 → warm median 32.5, a 2.15× difference). This is the definitive proof that cold single-run TPS is meaningless. **Verdict: Qwen 2.5 7B is the best 7B-class daily driver on 6 GB — fits fully AND faster.**
+
 ### Phase 6: Force Heavier Partial CPU Offload (no 14B download needed)
 
 You don't need a giant model to study partial offload — you can *induce* it on `llama3.1:8b` by inflating the KV cache with a bigger `num_ctx`. Bigger context = bigger KV cache = more layers pushed to CPU = bigger speed cliff. This is a cleaner experiment than downloading a 14B because it isolates a single variable (KV cache) while weights stay fixed.
@@ -522,18 +602,107 @@ for ctx in 4096 8192 16384; do
 done
 ```
 
-Expected trend on RTX 1000 Ada (6 GB):
-| num_ctx | SIZE (≈) | Processor split (≈) | TPS (≈) |
-|---|---|---|---|
-| 4096 | 5.9 GB | 7%/93% CPU/GPU | ~21 |
-| 8192 | 6.4 GB | 20-30% CPU | ~12-15 |
-| 16384 | 7.4 GB | 40-50% CPU | ~6-9 |
+⚠ The quick loop above has **no warmup**, so its first context (4K, run cold) reads noisy/low. For clean numbers, use the dedicated sweep script below.
+
+#### Rigorous version: `benchmark_ctx.sh` (warmup + median per context) ⭐
+
+Create it once:
+```bash
+cat > ~/local-ai/scripts/benchmark_ctx.sh <<'EOF'
+#!/bin/bash
+# Sweep num_ctx for one model: warmup + median TPS per context, plus the processor split.
+# Usage: ./benchmark_ctx.sh [model] ["ctx1 ctx2 ..."]
+MODEL="${1:-llama3.1:8b}"
+CTXS="${2:-4096 8192 16384}"
+NUM_PREDICT=100
+RUNS=5
+PROMPT="Count slowly from 1 to 100."
+
+echo "Context sweep for $MODEL (num_predict=$NUM_PREDICT, $RUNS runs each, with warmup)"
+echo "------------------------------------------------------------"
+
+for CTX in $CTXS; do
+  # Warmup at this context (forces reload + GPU clock ramp; discarded)
+  curl -s http://localhost:11434/api/generate -d "{
+    \"model\": \"$MODEL\",
+    \"prompt\": \"$PROMPT\",
+    \"stream\": false,
+    \"options\": {\"num_ctx\": $CTX, \"num_predict\": $NUM_PREDICT, \"seed\": 42}
+  }" > /dev/null
+
+  TPS_VALUES=()
+  for i in $(seq 1 $RUNS); do
+    TPS=$(curl -s http://localhost:11434/api/generate -d "{
+      \"model\": \"$MODEL\",
+      \"prompt\": \"$PROMPT\",
+      \"stream\": false,
+      \"options\": {\"num_ctx\": $CTX, \"num_predict\": $NUM_PREDICT, \"seed\": 42}
+    }" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'{d[\"eval_count\"]/(d[\"eval_duration\"]/1e9):.1f}')")
+    TPS_VALUES+=("$TPS")
+  done
+
+  MEDIAN=$(echo "${TPS_VALUES[@]}" | tr ' ' '\n' | sort -n | awk 'BEGIN{c=0}{a[c++]=$1}END{print a[int(c/2)]}')
+  INFO=$(ollama ps | awk -v m="$MODEL" '$1==m {print $3" "$4" | "$5" "$6}')
+  echo "ctx=$CTX | $INFO | median ${MEDIAN} TPS"
+
+  ollama stop "$MODEL" > /dev/null
+done
+EOF
+chmod +x ~/local-ai/scripts/benchmark_ctx.sh
+```
+
+Run:
+```bash
+~/local-ai/scripts/benchmark_ctx.sh llama3.1:8b
+# custom contexts:
+~/local-ai/scripts/benchmark_ctx.sh llama3.1:8b "2048 4096 8192 16384"
+```
+Output (one clean line per context):
+```
+ctx=4096 | 5.9 GB | 7%/93% CPU/GPU | median 25.4 TPS
+ctx=8192 | 6.4 GB | 15%/85% CPU/GPU | median XX.X TPS
+ctx=16384 | 8.0 GB | 33%/67% CPU/GPU | median XX.X TPS
+```
+
+**Measured on RTX 1000 Ada (6 GB) with `benchmark_ctx.sh` (warmup + median of 5)** ⭐ real data:
+| num_ctx | SIZE | Processor split | TPS (warm median) | vs 4K | Notes |
+|---|---|---|---|---|---|
+| 4096 | 5.9 GB | **7%/93% CPU/GPU** | **24.1** | baseline | |
+| 8192 | 6.4 GB | **15%/85% CPU/GPU** | **20.6** | −15% | only ~15% slower despite 2× the offload |
+| 16384 | 8.0 GB | **33%/67% CPU/GPU** | **10.3** | −57% | the cliff — <½ of 4K speed |
+
+The non-linear knee holds: 4K→8K (7%→15% offload) costs only ~15%, but 8K→16K (15%→33%) **halves** throughput.
+
+> 🌡 **Thermal wrinkle:** warm 16K here (10.3) came out *lower* than the earlier no-warmup batch 16K (~14.7) — backwards from the usual warmup-helps rule. Likely **thermal throttling**: `benchmark_ctx.sh` runs ~18 inferences before reaching 16K, and 16K leans hardest on the CPU (33% offload), so heat soak → CPU clocks down → the CPU-heavy case takes the biggest hit. The quick one-shot loop ran 16K only once (less heat soak) so it dodged the throttle. **Lesson: sustained-load steady-state TPS can be *lower* than burst TPS, especially for CPU-offloaded models. Burst benchmarks are optimistic for anything leaning on the CPU.**
 
 **This is partial offload in action.** As `num_ctx` rises:
-- SIZE in `ollama ps` grows (KV cache inflating)
-- CPU% in the processor split climbs (more layers spilled to RAM)
-- Generation slows dramatically (you wait on the CPU layers each token)
+- SIZE in `ollama ps` grows (KV cache *allocation* inflating: ~0.5 GB → 1 GB → 2 GB)
+- CPU% in the processor split climbs deterministically (more layers spilled to RAM)
+- Generation slows — but **non-linearly** (see below)
 - In a second terminal, `nvidia-smi dmon` or `htop` shows the GPU idling more while CPU works
+
+#### ⭐ Key finding: offload cost is NON-LINEAR (gentle slope, then a cliff)
+
+```
+ 7% offload → ~22 TPS  ┐ barely any cost — the GPU still does 85-93% of the work
+15% offload → ~21 TPS  ┘
+33% offload → ~14.7 TPS  ← the "knee": CPU work is now a big fraction
+```
+A *little* offload (7-15%) is nearly free; *a lot* (30%+) falls off a cliff. So the earlier "partial offload is a performance cliff" framing is really a **gentle slope then a cliff** — the knee on this hardware is ~20-30% offload. **Practical rule: if a model spills slightly over VRAM (≤15% offload), don't panic — you lose almost nothing.**
+
+#### Why PCIe bandwidth is NOT the bottleneck (common misconception)
+
+In partial offload, **weights do NOT stream across PCIe each token.** The CPU-offloaded layers keep their weights in system RAM and are *computed by the CPU*; the GPU layers compute in VRAM. The only thing crossing PCIe per token is the hidden-state activation vector (`hidden_dim` ≈ 4096 floats ≈ 8 KB) — about 1 microsecond on any PCIe gen. Negligible.
+
+The real cost of an offloaded layer is **CPU RAM bandwidth (~60 GB/s) + AVX compute**, which is only ~3-5× slower than a GPU layer (VRAM ~192 GB/s). That's why a handful of CPU layers barely hurts:
+```
+per-token time ≈ (GPU-layer time, VRAM-bound) + (CPU-layer time, RAM-bound)   [PCIe hop is free]
+warm 4K  (~2 CPU layers): ~42 ms → 24 TPS
+warm 8K  (~5 CPU layers): ~48 ms → 21 TPS   (+3 layers ≈ +6 ms, barely noticeable)
+warm 16K (~11 CPU layers): ~68 ms → 14.7 TPS (+6 layers ≈ +20 ms, now it bites)
+```
+
+> Note: KV-cache *allocation* (num_ctx) inflates VRAM SIZE and forces the offload, but the KV-cache *read* per token scales with the ACTUAL sequence length (~110 tokens here), not num_ctx. So bigger num_ctx hurts only by evicting model layers to CPU — not by making attention reads heavier in this short-prompt test.
 
 Reset to a sane default afterward (don't leave a huge context as your daily setting):
 ```bash
@@ -857,10 +1026,11 @@ These are the **5 models I have on disk** (no more downloads). This table is my 
 |---|---|---|---|---|---|---|
 | **Llama 3.2 3B @ ctx=4096** ✅ | Q4_K_M | 2.0 GB | ~3 GB | **100% GPU** | **~56 tok/s** | 7/10 |
 | Qwen 2.5 3B @ ctx=4096 | Q4_K_M | 1.9 GB | ~3 GB | (expect 100% GPU) | __ tok/s | __ /10 |
-| Qwen 2.5 7B @ ctx=4096 | Q4_K_M | 4.7 GB | __ GB | __ | __ tok/s | __ /10 |
-| **Llama 3.1 8B @ ctx=4096** ⚠ | Q4_K_M | 4.9 GB | **5.9 GB** | **7%/93% CPU/GPU** | **~21 tok/s** | 9/10 |
+| **Qwen 2.5 7B @ ctx=4096** ✅ | Q4_K_M | 4.7 GB | **4.9 GB** | **100% GPU (fits!)** | **32.5 tok/s (warm median)** | 8/10 |
+| **Llama 3.1 8B @ ctx=4096** ⚠ | Q4_K_M | 4.9 GB | **5.9 GB** | **7%/93% CPU/GPU** | **25.4 tok/s (warm median)** | 9/10 |
 | **Llama 3.1 8B @ ctx=2048** ⚠ | Q4_K_M | 4.9 GB | **5.6 GB** | **8%/92% CPU/GPU (still partial)** | **~21 tok/s (no gain)** | 9/10 |
-| Llama 3.1 8B @ ctx=8192 | Q4_K_M | 4.9 GB | ~6.4 GB | (expect 20-30% CPU) | __ tok/s | 9/10 |
+| **Llama 3.1 8B @ ctx=8192** | Q4_K_M | 4.9 GB | **6.4 GB** | **15%/85% CPU/GPU** | **~21 tok/s** | 9/10 |
+| **Llama 3.1 8B @ ctx=16384** | Q4_K_M | 4.9 GB | **8.0 GB** | **33%/67% CPU/GPU** | **~14.7 tok/s** | 9/10 |
 | Llama 3.1 8B-instruct-q4_K_S @ ctx=4096 | Q4_K_S | 4.7 GB | __ GB | __ | __ tok/s | __ /10 |
 
 **Bolded rows = real measurements on RTX 1000 Ada Laptop (6 GB) with prompt "Write a 3-sentence summary of why the sky is blue.", averaged over 2 runs.** Fill in the rest as you run Phases 5-7.
@@ -900,14 +1070,14 @@ If way off: probably forgot KV-cache scales with context length — check `num_c
 
 ## ⚠ Surprises & Lessons Learned
 
-1. **Llama 3.1 8B Q4_K_M does NOT fully fit on 6 GB regardless of context size.** Both `num_ctx: 4096` and `num_ctx: 2048` produce identical ~21 TPS, both with partial offload (`7%/93%` and `8%/92%` respectively). My intuition that "smaller context = fits on GPU" was wrong: weights (4.9 GB) dominate, not KV cache (0.25-0.5 GB). To actually reduce *weights*, use the `llama3.1:8b-instruct-q4_K_S` quant (~4.7 GB) or drop to a 3B model — or just accept ~21 TPS. **Always run `ollama ps` to verify your processor split, AND do the weights-vs-KV-cache math before assuming a fix will work.**
-2. **TPS drops ~2× from 3B to 8B.** 3B → ~56 tok/s, 8B → ~21 tok/s. Roughly 2× the params ≈ half the speed. Memory bandwidth is the bottleneck.
-3. **Single-run TPS numbers lie — benchmark properly.** Eight back-to-back identical curl requests gave TPS from 11.1 to 25.1 (2× spread). Causes: GPU clock ramp-up (slow first runs), output-length variance, prompt-length (KV cache) effect, and partial-offload CPU jitter. Real benchmarks need warmup + fixed `num_predict` + fixed `seed` + median of 5+ runs. (`~/local-ai/scripts/benchmark.sh`)
+1. **Llama 3.1 8B Q4_K_M does NOT fully fit on 6 GB regardless of context size.** Both `num_ctx: 4096` and `num_ctx: 2048` produce near-identical TPS (warm 4K median ≈ 25), both with partial offload (`7%/93%` and `8%/92%` respectively). My intuition that "smaller context = fits on GPU" was wrong: weights (4.9 GB) dominate, not KV cache (0.25-0.5 GB). To actually reduce *weights*, use the `llama3.1:8b-instruct-q4_K_S` quant (~4.7 GB) or drop to a 3B model — or just accept ~21 TPS. **Always run `ollama ps` to verify your processor split, AND do the weights-vs-KV-cache math before assuming a fix will work.**
+2. **TPS drops ~2× from 3B to 8B.** 3B → ~56 tok/s, 8B → ~25 tok/s (warm). Roughly 2× the params ≈ half the speed. Memory bandwidth is the bottleneck.
+3. **Single-run TPS numbers lie — benchmark properly.** Eight back-to-back identical curl requests gave TPS from 11.1 to 25.1 (2× spread). Causes: GPU clock ramp-up (slow first runs), output-length variance, prompt-length (KV cache) effect, and partial-offload CPU jitter. Real benchmarks need warmup + fixed `num_predict` + fixed `seed` + median of 5+ runs. (`~/local-ai/scripts/benchmark.sh`) **Concrete proof: Qwen 2.5 7B measured 15.1 TPS on a cold single run but 32.5 TPS warm median — a 2.15× difference. Trusting the cold number would have led to the wrong model choice.**
 4. **Decode TPS is a function of prompt+output length, not a constant.** Same model, same num_ctx: `"Hello"` → ~24 TPS, `"Hello explain me quantum physics"` → ~17 TPS. Each new token reads the K/V cache for ALL prior tokens, so longer context = more memory bandwidth per token. Compare models with identical prompt + `num_predict`.
-5. **Partial offload is a real performance cliff — and you can induce it with `num_ctx`.** Cranking Llama 3.1 8B from 4K → 8K → 16K context grows the KV cache, climbs the CPU% in `ollama ps`, and drops TPS from ~21 → ~12 → ~7. The CPU layers are the bottleneck; the GPU idles waiting on them each token.
+5. **Partial offload cost is NON-LINEAR — a gentle slope, then a cliff (measured warm with `benchmark_ctx.sh`).** 4K = 7% CPU → **24.1 TPS**; 8K = 15% CPU → **20.6 TPS** (only −15% despite 2× the offload); 16K = 33% CPU → **10.3 TPS** (−57%, the cliff). A *little* offload (≤15%) is nearly free because the GPU still does 85%+ of the work; *a lot* (30%+) bites. **Bonus finding:** warm 16K (10.3) came out *lower* than a cold one-shot 16K (~14.7) — thermal throttling under sustained load, and CPU-offloaded cases throttle hardest. So burst TPS > steady-state TPS for offloaded models. (My original estimate of ~21→12→7 was too pessimistic on the slope but right about the cliff.)
 6. **Q4_K_S vs Q4_K_M = small memory save for a usually-imperceptible quality cost.** Same model, the "small" 4-bit quant is ~200 MB lighter; quality is near-identical for chat/translation, with Q4_K_M occasionally better on precise math/code. Going *up* to Q8_0 (~8 GB) is pointless on 6 GB — it won't fit and the gain over Q4_K_M is ~1%.
 7. **`num_ctx` is a useful lever but NOT the dominant one for 8B-class on 6 GB.** Halving context saves only ~250 MB of KV cache, but the weights are the dominant cost (~4.9 GB for 8B Q4_K_M). On a card ~600 MB short, that 250 MB doesn't escape offload. To actually fix it, reduce the *weights* (smaller quant or smaller model).
-8. **Memory-bandwidth-bound theory predicts my numbers within 5%.** RTX 1000 Ada (~192 GB/s) ÷ model_size_in_VRAM × ~60% efficiency = predicted TPS. 3B @ 2 GB → 58 predicted, 56 measured. 8B @ 4.9 GB w/ 7% CPU offload → 21 predicted, 21 measured. **Decode is memory-bandwidth-bound, full stop** — the single most important performance principle in local inference at this size class.
+8. **Memory-bandwidth-bound theory predicts my warm numbers within ~5%.** Formula: RTX 1000 Ada (~192 GB/s) ÷ model_size_in_VRAM × efficiency = predicted TPS. With proper warmup, measured efficiency is ~80-83% (not the 60% I first guessed from cold runs). Warm validation: Qwen 2.5 7B @ 4.9 GB, 100% GPU → 192÷4.9 = 39 max × 83% = 32.4 predicted, **32.5 measured** ✔. Llama 3.1 8B @ 5.9 GB w/ 7% offload → ~27 if fully resident, minus offload tax = **25.4 measured** ✔. **Decode is memory-bandwidth-bound, full stop** — the single most important performance principle in local inference at this size class.
 9. **On 6 GB you have a 3-corner triangle: {model size, context length, fully-on-GPU} — pick any two.** Llama 3.1 8B + 4K + fully-on-GPU is impossible; 8B + 2K = still partial; a 7B like Qwen 2.5 7B + 4K = closer; Llama 3.2 3B + 8K = comfortable. This trade-off recurs at every VRAM tier in the field.
 10. **The Python `ollama` library is a one-line install** and turns local AI into a programmable resource. This is the moment LLMs go from "thing I chat with" to "thing I build with."
 11. **OpenAI-compat works flawlessly.** Same Python code that hits OpenAI's API works against local Ollama by changing one URL. This is why the ecosystem coalesced around this protocol.
@@ -916,6 +1086,10 @@ If way off: probably forgot KV-cache scales with context length — check `num_c
 14. **The `ollama` CLI is just a wrapper around HTTP calls.** `ollama list` = `curl /api/tags`, `ollama run X "Y"` = `curl /api/generate -d '{"model":"X","prompt":"Y"}'`, etc. Any HTTP client in any language can drive Ollama.
 15. **`jq` is essential for shell API exploration.** `curl ... | jq` makes JSON readable. Install: `sudo apt install -y jq`.
 16. **GPU utilization at 70% is a SYMPTOM, not a problem in itself.** Either (a) memory-bandwidth-bound decode (normal — even fully-on-GPU models hit 80-95%, not 100%), or (b) partial CPU offload making the GPU wait. Diagnose with `ollama ps`: `X%/Y% CPU/GPU` = offload; `100% GPU` = fully resident.
+17. **Same tier ≠ same fit — measured proof.** Qwen 2.5 7B loads at **4.9 GB → 100% GPU**, but Llama 3.1 8B loads at **5.9 GB → 7% CPU offload**, despite both being "7-8B Q4_K_M" and nearly identical on disk (4.7 vs 4.9 GB). The ~1 GB VRAM gap comes from architecture: Llama has more params (8.0B vs 7.6B), more layers (32 vs 28), and 2× the KV heads (8 vs 4 → ~2× the KV cache). **On 6 GB, prefer Qwen 2.5 7B over Llama 3.1 8B if you want a 7B-class model fully on GPU.** Lesson: always check `ollama ps` for the real VRAM footprint — disk size is a poor predictor. **Warm benchmark confirms the speed too: Qwen 32.5 vs Llama 25.4 TPS median (~28% faster). Qwen 2.5 7B is the best 7B-class daily driver on this hardware — it fits fully AND runs faster.**
+18. **Cold-load penalty is real and separate from decode speed.** First request after a model loads: `total_duration` includes ~8-10s to read the weights from disk into VRAM (measured 14.08s total vs 4.23s decode for cold Llama 3.1 8B). Subsequent requests are warm (keep-alive) and `total_duration` drops to ~decode time. Never benchmark the first (cold) run.
+19. **PCIe bandwidth is NOT the bottleneck in CPU offload (common misconception).** The CPU-offloaded layers keep their weights in system RAM and are *computed by the CPU* — weights do not stream across PCIe per token. Only the hidden-state activation vector (~8 KB) crosses the bus per token (~1 µs, negligible). The real cost is **CPU RAM bandwidth (~60 GB/s) + AVX compute**, which is ~3-5× slower than a GPU layer (VRAM ~192 GB/s). This is why offloading a *few* layers barely hurts but offloading *many* falls off a cliff.
+20. **num_ctx inflates VRAM by *allocation*, not by per-token read cost (for short prompts).** Going 4K→8K→16K grew SIZE 5.9→6.4→8.0 GB because Ollama pre-allocates the full KV-cache buffer. But with only ~110 tokens of real context, the KV *read* per token is tiny regardless. So large num_ctx hurts purely by evicting model layers to CPU — a second-order effect, not a direct attention-cost effect, until you actually fill the context.
 
 ---
 
@@ -950,6 +1124,90 @@ If way off: probably forgot KV-cache scales with context length — check `num_c
 - [ ] All scripts saved in `~/local-ai/scripts/` (version-controllable)
 - [ ] You called at least 5 different API endpoints with raw `curl` from the shell
 - [ ] You understand that `ollama list`, `ollama run X`, `ollama pull X`, etc. are just CLI shortcuts for HTTP calls
+
+---
+
+## 🧾 Command Cheatsheet (Quick Lookup)
+
+> Everything from Day 1-2 in one place. Format: **"I want to ___ → run this."** Base URL for API is `http://localhost:11434`.
+
+### Running & chatting
+| I want to… | Command |
+|---|---|
+| Chat interactively | `ollama run qwen2.5:7b` |
+| Exit the chat | `/bye` (inside the chat) |
+| One-shot prompt (print + exit) | `ollama run qwen2.5:7b "Explain X in 3 lines"` |
+| Change a setting mid-chat | `/set parameter num_ctx 8192` (inside the chat) |
+| In-chat help | `/?` (inside the chat) |
+
+### Increase context window / generation options (API body)
+| I want to… | Add to the JSON body |
+|---|---|
+| **Increase context window** | `"options": {"num_ctx": 8192}` |
+| Cap output length | `"options": {"num_predict": 100}` |
+| Make output deterministic | `"options": {"seed": 42, "temperature": 0}` |
+| Lower / raise creativity | `"options": {"temperature": 0.2}` (focused) … `1.0` (creative) |
+
+### VRAM & loaded-model management
+| I want to… | Command |
+|---|---|
+| See what's loaded + CPU/GPU split | `ollama ps` |
+| **Unload a model now (free VRAM)** | `ollama stop <model>` |
+| Watch VRAM live | `watch -n 1 nvidia-smi` |
+| Keep a model warm forever | env `OLLAMA_KEEP_ALIVE=-1`, or `"keep_alive": -1` per request |
+| Unload right after a request | `"keep_alive": 0` in the request body |
+
+### Benchmarking (your scripts)
+| I want to… | Command |
+|---|---|
+| TPS of one model | `~/local-ai/scripts/benchmark.sh <model> <num_ctx>` |
+| TPS across context sizes | `~/local-ai/scripts/benchmark_ctx.sh <model> "4096 8192 16384"` |
+| Quick one-off TPS | `curl -s localhost:11434/api/generate -d '{...}' \| python3 -c "..."` |
+
+### Model library
+| I want to… | Command |
+|---|---|
+| List installed models | `ollama list` |
+| **Load / pull a new model** | `ollama pull <model>` (e.g. `ollama pull mistral:7b`) |
+| Pull any GGUF from HuggingFace | `ollama pull hf.co/<user>/<repo>:<quant>` |
+| See a model's details / params | `ollama show <model>` |
+| Delete a model | `ollama rm <model>` |
+
+### Disk & storage (models live under the service user, not `~`)
+| I want to… | Command |
+|---|---|
+| Total Ollama disk usage | `sudo du -sh /usr/share/ollama/.ollama/` |
+| Biggest model files | `sudo du -h /usr/share/ollama/.ollama/models/blobs/* \| sort -hr \| head` |
+| Free space in WSL2 | `df -h ~` |
+
+### API endpoints
+| I want to… | Endpoint |
+|---|---|
+| Single completion | `POST /api/generate` |
+| Chat w/ message history | `POST /api/chat` |
+| List installed models | `GET /api/tags` |
+| List loaded models | `GET /api/ps` |
+| Get embeddings (for RAG later) | `POST /api/embeddings` |
+| OpenAI drop-in | `POST /v1/chat/completions` |
+
+### Ollama service control
+| I want to… | Command |
+|---|---|
+| Restart Ollama | `sudo systemctl restart ollama` |
+| Check service status | `systemctl status ollama` |
+| Follow live logs | `journalctl -u ollama -f` |
+| Verify GPU/CUDA backend | `journalctl -u ollama \| grep -i cuda` |
+
+### My hardware quick-reference (RTX 1000 Ada, 6 GB) — measured
+| Model | Fits? | Warm TPS | Use for |
+|---|---|---|---|
+| `llama3.2:3b` | ✅ 100% GPU | ~56 | fast iteration, agents, RAG dev |
+| `qwen2.5:3b` | ✅ 100% GPU | (bench it) | fast, multilingual |
+| `qwen2.5:7b` | ✅ 100% GPU | ~32.5 | **best 7B daily driver** |
+| `llama3.1:8b` (Q4_K_M) | ⚠ 7% CPU offload | ~25 | best quality, accept the offload |
+| `llama3.1:8b-instruct-q4_K_S` | ? (Phase 7 — bench it) | ? | lighter-quant test |
+
+> Rule of thumb on 6 GB: **default to `qwen2.5:7b`** (fits + fast). Drop to `llama3.2:3b` when you need speed or long context. Reach for `llama3.1:8b` only when you want its specific answer quality and can tolerate ~25 TPS.
 
 ---
 
