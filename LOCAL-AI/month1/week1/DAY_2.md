@@ -217,7 +217,7 @@ Open two terminals.
 
 **Terminal 1** — start a watch on VRAM and processor split:
 ```bash
-watch -n 1 'echo "=== ollama ps ==="; ollama ps; echo; echo "=== nvidia-smi ==="; nvidia-smi --query-gpu=memory.used,memory.free,utilization.gpu --format=csv'
+watch -n 1 'echo "=== ollama ps ==="; ollama ps; echo; echo "=== nvidia-smi ==="; nvidia-smi --query-gpu=memory.used,memory.free,utilization.gpu,temperature.gpu,clocks.sm,power.draw --format=csv'
 ```
 
 **Terminal 2** — fire a real query and measure:
@@ -1234,6 +1234,7 @@ If way off: probably forgot KV-cache scales with context length — check `num_c
 | See what's loaded + CPU/GPU split | `ollama ps` |
 | **Unload a model now (free VRAM)** | `ollama stop <model>` |
 | Watch VRAM live | `watch -n 1 nvidia-smi` |
+| Watch VRAM + temp + clocks + power (catch throttling) | `watch -n 1 'nvidia-smi --query-gpu=memory.used,memory.free,utilization.gpu,temperature.gpu,clocks.sm,power.draw --format=csv'` |
 | Keep a model warm forever | env `OLLAMA_KEEP_ALIVE=-1`, or `"keep_alive": -1` per request |
 | Unload right after a request | `"keep_alive": 0` in the request body |
 

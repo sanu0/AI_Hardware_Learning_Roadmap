@@ -305,7 +305,7 @@ If you run `du -sh ~/.ollama/` and see only KB, **that's normal** — the models
 
 Ollama uses a privilege-separated architecture similar to Docker:
 ```
-Your user (ksanu)                       ollama service user
+Your user (you)                         ollama service user
 ─────────────────                       ───────────────────
 ollama CLI                              systemd service
   │                                     (background, auto-starts)
@@ -480,6 +480,14 @@ ollama run llama3.2:3b
 # >>> chat here
 # /bye to exit
 ```
+
+**The `ollama run` REPL has its own built-in slash-commands** (type `/?` to list): `/set`, `/show`, `/load`, `/save`, `/clear`, `/bye`. The most useful one:
+```
+/set verbose
+```
+Toggles a stats block after every reply — including `eval rate: XX tokens/s` (your tok/s). Or start verbose from the shell: `ollama run --verbose llama3.2:3b`.
+
+> ⚠ These are the **Ollama CLI's** commands. Custom scripts (like the `chat.py` we build on Day 3) define their *own* commands (e.g. `/stats`, `/reset`, `/system`) that only work inside that script — they are NOT available in `ollama run`. And note `/save` differs: in the CLI it saves your session *as a model*; in `chat.py` it saves a *transcript file*.
 
 #### Way 2: One-Shot Query (great for scripts)
 ```bash

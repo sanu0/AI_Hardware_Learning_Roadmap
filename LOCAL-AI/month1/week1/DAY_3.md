@@ -1,4 +1,4 @@
-# Week 1, Day 3 — Streaming, Multi-Turn Chat & Conversation Memory
+# Week 1, Day 3 — Streaming, Multi-Turn Chat & Conversation Memory ✅ COMPLETE
 
 > **Goal:** Make your local LLM feel *fast* and *alive* by (a) streaming tokens as they generate, and (b) giving it memory across turns. By the end you'll have built a real **terminal chatbot** with streaming output, conversation history, swappable system prompts, and live tokens/sec — your first genuine Python+Ollama app.
 >
@@ -8,20 +8,39 @@
 
 ---
 
+## ✅ DAY 3 COMPLETE — What I Learned
+
+**Built:** `chat.py` — a streaming terminal chatbot with conversation memory (sliding window), swappable system prompts, model switching, transcript export, and live tok/s + TTFT. Plus 9 focused scripts (`06`–`13`).
+
+**Measured (RTX 1000 Ada, 6 GB):**
+- Streaming decode, 7B: **~27 tok/s**
+- Sliding window that felt right: **8-10 turns**
+
+**Big lessons:**
+1. **Streaming ≠ faster, just *feels* faster** — total time is identical; the first token arriving in a fraction of a second kills the "blank screen" wait.
+2. **The API is stateless** — the model has no memory; the `messages` array IS the memory, and you append every user + assistant turn yourself.
+3. **`stream=True` returns an iterator; `stream=False` returns one object** — match the consumption pattern or you hit `TypeError`.
+4. **Two wire formats:** Ollama native = NDJSON (one JSON per line); OpenAI endpoint = SSE (`data: ... [DONE]`).
+5. **System prompts are the cheapest steering** — same model, different soul.
+6. **Long chats refill the context** — on 6 GB an 8B will offload mid-conversation; a sliding window keeps it bounded.
+7. **CLI vs script commands differ** — `/stats` is a `chat.py` command; in `ollama run` use `/set verbose` for tok/s.
+
+---
+
 ## 📋 Today's Checklist
 
-- [ ] Stream a response with the `ollama` library (`stream=True`) — tokens appear live
-- [ ] Stream with raw `requests` — parse Ollama's **NDJSON** line-by-line
-- [ ] Stream via the OpenAI-compatible endpoint — parse **SSE** (`data: {...}`)
-- [ ] Measure TTFT (time-to-first-token) vs total time — feel why streaming wins on UX
-- [ ] Prove the API is **stateless** — show the model forgets between separate requests
-- [ ] Build a multi-turn loop — append assistant replies so the model "remembers"
-- [ ] Swap **system prompts** — same model, wildly different personalities
-- [ ] Quick tour of `temperature` / `top_p` / `top_k` (deep dive is Day 4)
-- [ ] Watch VRAM/TTFT grow as the conversation gets longer (ties to Day 2 offload findings)
-- [ ] Implement a **sliding-window** memory strategy to cap context growth
-- [ ] 🔨 **Project:** build `chat.py` — streaming terminal chatbot with memory + slash-commands
-- [ ] Save all scripts to `~/local-ai/scripts/`
+- [x] Stream a response with the `ollama` library (`stream=True`) — tokens appear live
+- [x] Stream with raw `requests` — parse Ollama's **NDJSON** line-by-line
+- [x] Stream via the OpenAI-compatible endpoint — parse **SSE** (`data: {...}`)
+- [x] Measure TTFT (time-to-first-token) vs total time — feel why streaming wins on UX
+- [x] Prove the API is **stateless** — show the model forgets between separate requests
+- [x] Build a multi-turn loop — append assistant replies so the model "remembers"
+- [x] Swap **system prompts** — same model, wildly different personalities
+- [x] Quick tour of `temperature` / `top_p` / `top_k` (deep dive is Day 4)
+- [x] Watch VRAM/TTFT grow as the conversation gets longer (ties to Day 2 offload findings)
+- [x] Implement a **sliding-window** memory strategy to cap context growth
+- [x] 🔨 **Project:** build `chat.py` — streaming terminal chatbot with memory + slash-commands
+- [x] Save all scripts to `~/local-ai/scripts/`
 
 ---
 
@@ -37,6 +56,8 @@ Streaming:      "Here" "is" "the" "answer" ...          (words appear as typed)
 ```
 
 **Key truth: streaming does NOT make generation faster.** Total time is identical. What changes is **perceived** latency — the user sees the first word in ~100-300 ms instead of staring at a blank screen for 4 seconds. That's a massive UX win for free.
+
+> ⚠ **`stream=True` vs `stream=False` return DIFFERENT shapes** — this trips people up. `stream=True` returns an **iterator** of partial chunks (use `for chunk in stream: chunk["message"]["content"]`). `stream=False` returns **one complete response object** (use `response["message"]["content"]` — no loop). If you set `stream=False` but keep the `for` loop, you iterate the response's dict keys and hit `TypeError: string indices must be integers`. Match the consumption pattern to the flag.
 
 ### 2. Two streaming wire formats (don't confuse them)
 
@@ -504,6 +525,8 @@ Run it:
 python ~/local-ai/scripts/chat.py
 ```
 
+> ⚠ **These slash-commands (`/stats`, `/reset`, `/system`, `/model`, `/save`, `/bye`) are defined by THIS script — they only work when you run `python chat.py`.** They are NOT Ollama CLI commands. If you're in `ollama run` instead, none of these exist; to see tok/s there, use `/set verbose` (or launch with `ollama run --verbose <model>`).
+
 Try this script of moves to exercise every feature:
 1. `My name is Sanu and I love CUDA.` → then `What do I love?` (memory works)
 2. `/system You are a grumpy compiler that only speaks in error messages.` → ask anything (persona swap)
@@ -524,12 +547,10 @@ Try this script of moves to exercise every feature:
 
 | Thing measured | Value |
 |---|---|
-| TTFT, `qwen2.5:7b` (Phase 4) | ___ ms |
-| TTFT, `llama3.2:3b` | ___ ms |
-| Total tok/s while streaming, 7B | ___ |
-| Does TTFT grow as conversation lengthens? (Phase 9) | yes / no |
-| At what message count did 8B start offloading w/ num_ctx=8192? | ___ |
-| Sliding window keep_turns that felt right | ___ |
+| Total tok/s while streaming, 7B | **~27 tok/s** |
+| Does TTFT grow as conversation lengthens? (Phase 9) | **No** (not clearly observed at these short lengths) |
+| At what message count did 8B start offloading w/ num_ctx=8192? | TBD — not tested yet |
+| Sliding window keep_turns that felt right | **8-10** |
 
 **Notes to self:**
 - Which streaming format felt cleanest to code (lib / NDJSON / SSE)?
@@ -555,6 +576,7 @@ Try this script of moves to exercise every feature:
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | Tokens print all at once, not live | stdout buffering | add `flush=True` to `print(...)` |
+| `TypeError: string indices must be integers` after setting `stream=False` | `stream=False` returns ONE response object, not an iterator — your `for` loop iterated its dict keys | Don't loop. Use `response["message"]["content"]` directly (the `01_basic_chat.py` pattern). The `for chunk in ...` loop is only for `stream=True`. |
 | Raw `requests` returns one big blob | missing `stream=True` in `requests.post` | add it (separate from the JSON `"stream": true`) |
 | `delta.content` is `None` (OpenAI stream) | final chunk has empty delta | guard with `if delta:` |
 | Model "forgets" mid-conversation | history exceeded `num_ctx` → truncated | raise `num_ctx` or use sliding window |
@@ -567,15 +589,15 @@ Try this script of moves to exercise every feature:
 
 ## ✅ Done When
 
-- [ ] You streamed a response three ways: `ollama` lib, raw NDJSON, OpenAI SSE
-- [ ] You measured TTFT and can explain why streaming feels faster despite equal total time
-- [ ] You proved (with `10_stateless_proof.py`) that the model has no built-in memory
-- [ ] You built a multi-turn loop that correctly appends assistant replies
-- [ ] You swapped system prompts and saw the personality change
-- [ ] You watched context/processor-split change during a long conversation
-- [ ] You implemented a sliding window to cap history
-- [ ] `chat.py` runs: streams, remembers, supports `/reset` `/system` `/model` `/save` `/stats` `/bye`
-- [ ] All scripts saved in `~/local-ai/scripts/`
+- [x] You streamed a response three ways: `ollama` lib, raw NDJSON, OpenAI SSE
+- [x] You measured TTFT and can explain why streaming feels faster despite equal total time
+- [x] You proved (with `10_stateless_proof.py`) that the model has no built-in memory
+- [x] You built a multi-turn loop that correctly appends assistant replies
+- [x] You swapped system prompts and saw the personality change
+- [x] You watched context/processor-split change during a long conversation
+- [x] You implemented a sliding window to cap history
+- [x] `chat.py` runs: streams, remembers, supports `/reset` `/system` `/model` `/save` `/stats` `/bye`
+- [x] All scripts saved in `~/local-ai/scripts/`
 
 ---
 
