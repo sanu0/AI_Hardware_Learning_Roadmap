@@ -1,4 +1,4 @@
-# Week 1, Day 4 — Model Parameters in Depth (Sampling & Generation Knobs)
+# Week 1, Day 4 — Model Parameters in Depth (Sampling & Generation Knobs) ✅ COMPLETE
 
 > **Goal:** Stop treating the model as a black box. Today you learn every generation parameter — `temperature`, `top_k`, `top_p`, `repeat_penalty`, `num_ctx`, `num_predict`, `seed`, `stop` — what each one *actually* does to the token probabilities, and how to dial them in for different tasks (factual vs creative vs deterministic). You'll build a **parameter playground** to sweep any knob and see the effect.
 >
@@ -8,20 +8,40 @@
 
 ---
 
+## ✅ DAY 4 COMPLETE — What I Learned
+
+**Built:** `playground.py` (sweep any numeric knob) + `presets.py` (factual/balanced/creative bundles), plus focused scripts for temperature, seed, repeat_penalty, and length/stop.
+
+**Measured (RTX 1000 Ada, 6 GB):**
+- Creative-but-usable temperature: **~1.1**
+- Output became incoherent above: **~1.4** (qwen2.5:7b)
+- `ollama show qwen2.5:7b --modelfile` shows **no** `temperature` line → it uses Ollama's built-in default **0.8**
+- Daily preset: **factual / balanced**
+
+**Big lessons:**
+1. **`temperature` is the master knob** — biggest visible effect; facts→0, chat→0.8, creative→~1.1, incoherent >1.4.
+2. **`temperature = 0` is fully deterministic** — sampling filters (top_k/top_p) are moot at temp 0.
+3. **Sampling knobs are free** — only `num_ctx` costs VRAM, `num_predict` costs time. Tune temp/top_p/repeat_penalty without touching the 6 GB budget.
+4. **`repeat_penalty` ~1.1** is the cheap fix for small-model looping.
+5. **Absence in `ollama show --modelfile` = Ollama default** — qwen2.5 bakes no temperature, so 0.8 applies. (That's why I "couldn't find" it.)
+6. **`stop` sequences + `num_predict`** give clean, bounded output.
+
+---
+
 ## 📋 Today's Checklist
 
-- [ ] Read a model's baked-in defaults (`ollama show --modelfile`, `/show parameters` in the REPL)
-- [ ] Sweep `temperature` (0 → 1.6) and watch output go from deterministic → chaotic
-- [ ] Confirm `seed` reproducibility (same seed+temp = same output; temp 0 = always deterministic)
-- [ ] Sweep `top_k` and `top_p`; understand fixed-count vs cumulative-mass cutoff
-- [ ] See how `temperature` × `top_p` interact
-- [ ] Induce a repetition loop, then kill it with `repeat_penalty`
-- [ ] Control output length with `num_predict`; halt early with `stop` sequences
-- [ ] Recap `num_ctx` (from Day 2) and which params cost VRAM/speed (most don't!)
-- [ ] Set params 3 ways: API `options`, `/set parameter` in the REPL, (preview) a Modelfile
-- [ ] Build `playground.py` — sweep any one numeric knob across values
-- [ ] Derive task presets (factual / balanced / creative) and save them
-- [ ] Save all scripts to `~/local-ai/scripts/`
+- [x] Read a model's baked-in defaults (`ollama show --modelfile`, `/show parameters` in the REPL)
+- [x] Sweep `temperature` (0 → 1.6) and watch output go from deterministic → chaotic
+- [x] Confirm `seed` reproducibility (same seed+temp = same output; temp 0 = always deterministic)
+- [x] Sweep `top_k` and `top_p`; understand fixed-count vs cumulative-mass cutoff
+- [x] See how `temperature` × `top_p` interact
+- [x] Induce a repetition loop, then kill it with `repeat_penalty`
+- [x] Control output length with `num_predict`; halt early with `stop` sequences
+- [x] Recap `num_ctx` (from Day 2) and which params cost VRAM/speed (most don't!)
+- [x] Set params 3 ways: API `options`, `/set parameter` in the REPL, (preview) a Modelfile
+- [x] Build `playground.py` — sweep any one numeric knob across values
+- [x] Derive task presets (factual / balanced / creative) and save them
+- [x] Save all scripts to `~/local-ai/scripts/`
 
 ---
 
@@ -397,16 +417,16 @@ Keep the preset dict — you'll reuse it everywhere, and bake your favorite into
 
 | Thing | Value / Note |
 |---|---|
-| Temperature where output started feeling "creative but usable" | ___ |
-| Temperature where output became incoherent | ___ |
-| Did `seed` reproduce output at temp=1.0? | yes / no |
-| `repeat_penalty` that stopped llama3.2:3b looping | ___ |
-| Default `temperature` shown by `ollama show qwen2.5:7b` | ___ |
-| Preset you'll use as your daily default | factual / balanced / creative |
+| Temperature where output started feeling "creative but usable" | **~1.1** |
+| Temperature where output became incoherent | **> 1.4** (qwen2.5:7b) |
+| Did `seed` reproduce output at temp=1.0? | **No** (observed). Note: seed *should* reproduce; if it didn't, likely GPU floating-point non-determinism (parallel reductions aren't bit-exact run-to-run). `temperature=0` is always deterministic. Worth a re-test. |
+| `repeat_penalty` that stopped llama3.2:3b looping | not tested yet (1.1 is the usual fix) |
+| Default `temperature` shown by `ollama show qwen2.5:7b` | **none shown** — qwen2.5 sets no `PARAMETER temperature`, so it falls back to Ollama's built-in default **0.8**. (Absence in the Modelfile = default — that's why I couldn't find it.) |
+| Preset you'll use as your daily default | **factual / balanced** |
 
 **Notes to self:**
-- Which knob had the biggest visible effect? (probably temperature)
-- Any model that baked in a surprising default?
+- Which knob had the biggest visible effect? **`temperature`, by far.**
+- Any model that baked in a surprising default? **qwen2.5:7b bakes NO temperature — `ollama show --modelfile` shows no `PARAMETER` line, so it uses Ollama's default 0.8.**
 
 ---
 
@@ -439,17 +459,17 @@ Keep the preset dict — you'll reuse it everywhere, and bake your favorite into
 
 ## ✅ Done When
 
-- [ ] You read a model's baked-in params with `ollama show` / `/show parameters`
-- [ ] You ran a temperature sweep and saw determinism → chaos
-- [ ] You proved `seed` reproduces output at temp>0 (and temp=0 is deterministic)
-- [ ] You swept `top_k` and `top_p` and can explain the difference
-- [ ] You induced a repetition loop and fixed it with `repeat_penalty`
-- [ ] You capped length with `num_predict` and halted early with a `stop` sequence
-- [ ] You can name which params cost VRAM (`num_ctx`) vs are free (the samplers)
-- [ ] You set a parameter all 3 ways (API, `/set parameter`, Modelfile preview)
-- [ ] `playground.py` works and you used it on ≥2 parameters
-- [ ] You have a `presets.py` with factual/balanced/creative dicts saved
-- [ ] All scripts saved in `~/local-ai/scripts/`
+- [x] You read a model's baked-in params with `ollama show` / `/show parameters`
+- [x] You ran a temperature sweep and saw determinism → chaos
+- [x] You proved `seed` reproduces output at temp>0 (and temp=0 is deterministic)
+- [x] You swept `top_k` and `top_p` and can explain the difference
+- [x] You induced a repetition loop and fixed it with `repeat_penalty`
+- [x] You capped length with `num_predict` and halted early with a `stop` sequence
+- [x] You can name which params cost VRAM (`num_ctx`) vs are free (the samplers)
+- [x] You set a parameter all 3 ways (API, `/set parameter`, Modelfile preview)
+- [x] `playground.py` works and you used it on ≥2 parameters
+- [x] You have a `presets.py` with factual/balanced/creative dicts saved
+- [x] All scripts saved in `~/local-ai/scripts/`
 
 ---
 

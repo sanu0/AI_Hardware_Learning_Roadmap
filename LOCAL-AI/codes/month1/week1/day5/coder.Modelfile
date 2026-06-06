@@ -1,0 +1,12 @@
+# Day 5 — Custom model: same base (Qwen 2.5 7B), low-temp coding preset.
+# Demonstrates that "a preset is a model" — different defaults = a different model.
+# Build:  ollama create coder -f coder.Modelfile
+# Run:    ollama run coder "reverse a linked list in Python"
+FROM qwen2.5:7b
+
+PARAMETER temperature 0.1
+PARAMETER top_p 0.9
+PARAMETER repeat_penalty 1.1
+PARAMETER num_ctx 4096
+
+SYSTEM """You are a senior software engineer. Output working code first, then a one-line explanation. Be terse, no preamble."""

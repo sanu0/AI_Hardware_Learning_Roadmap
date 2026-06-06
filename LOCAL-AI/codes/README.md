@@ -31,13 +31,17 @@ codes/
         │   ├── 12_system_prompts.py
         │   ├── 13_sampling_intro.py
         │   └── chat.py            # terminal chatbot project
-        └── day4/                  # Model parameters (sampling knobs)
-            ├── 14_temperature_sweep.py
-            ├── 15_seed_demo.py
-            ├── 16_repeat_penalty.py
-            ├── 17_length_and_stop.py
-            ├── playground.py      # sweep any one parameter
-            └── presets.py         # factual / balanced / creative presets
+        ├── day4/                  # Model parameters (sampling knobs)
+        │   ├── 14_temperature_sweep.py
+        │   ├── 15_seed_demo.py
+        │   ├── 16_repeat_penalty.py
+        │   ├── 17_length_and_stop.py
+        │   ├── playground.py      # sweep any one parameter
+        │   └── presets.py         # factual / balanced / creative presets
+        └── day5/                  # CLI mastery + Modelfiles (custom models)
+            ├── Modelfile          # local-assistant: balanced preset + persona
+            ├── coder.Modelfile    # low-temp coding variant
+            └── build_assistant.sh # build + smoke-test both models
 ```
 
 ## Running

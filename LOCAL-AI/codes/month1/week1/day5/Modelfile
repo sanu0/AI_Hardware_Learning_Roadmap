@@ -1,0 +1,14 @@
+# Day 5 — Custom model: Qwen 2.5 7B + balanced preset + a persona.
+# A custom model = base weights (shared, not re-downloaded) + these baked-in defaults.
+# Build:  ollama create local-assistant -f Modelfile
+# Run:    ollama run local-assistant
+FROM qwen2.5:7b
+
+# Balanced preset (from Day 4)
+PARAMETER temperature 0.7
+PARAMETER top_p 0.9
+PARAMETER repeat_penalty 1.1
+PARAMETER num_ctx 4096
+
+SYSTEM """You are a concise, helpful local AI assistant running on a 6 GB laptop GPU.
+Answer clearly and briefly. Prefer concrete examples and code. If unsure, say so."""
