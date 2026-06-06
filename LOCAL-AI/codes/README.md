@@ -10,24 +10,34 @@ so the code for any lesson sits right next to where that lesson is described.
 codes/
 └── month1/
     └── week1/
-        ├── benchmark.sh           # TPS benchmark, one model            (Day 2)
-        ├── benchmark_ctx.sh       # TPS across context sizes            (Day 2)
-        ├── day2/                  # Driving Ollama from Python
+        ├── day1/                  # Install & first run
+        │   └── check_setup.sh     # one-shot stack sanity check
+        ├── day2/                  # Driving Ollama from Python + benchmarking
+        │   ├── benchmark.sh       # TPS benchmark, one model
+        │   ├── benchmark_ctx.sh   # TPS across context sizes
         │   ├── 01_basic_chat.py
         │   ├── 02_streaming_chat.py
         │   ├── 03_raw_api.py
         │   ├── 04_openai_compat.py
         │   └── 05_compare_models.py
-        └── day3/                  # Streaming, multi-turn, memory
-            ├── 06_stream_lib.py
-            ├── 07_stream_requests.py
-            ├── 08_stream_openai.py
-            ├── 09_ttft.py
-            ├── 10_stateless_proof.py
-            ├── 11_multiturn.py
-            ├── 12_system_prompts.py
-            ├── 13_sampling_intro.py
-            └── chat.py            # terminal chatbot project
+        ├── day3/                  # Streaming, multi-turn, memory
+        │   ├── 06_stream_lib.py
+        │   ├── 07_stream_requests.py
+        │   ├── 08_stream_openai.py
+        │   ├── 08b_stream_sse_raw.py
+        │   ├── 09_ttft.py
+        │   ├── 10_stateless_proof.py
+        │   ├── 11_multiturn.py
+        │   ├── 12_system_prompts.py
+        │   ├── 13_sampling_intro.py
+        │   └── chat.py            # terminal chatbot project
+        └── day4/                  # Model parameters (sampling knobs)
+            ├── 14_temperature_sweep.py
+            ├── 15_seed_demo.py
+            ├── 16_repeat_penalty.py
+            ├── 17_length_and_stop.py
+            ├── playground.py      # sweep any one parameter
+            └── presets.py         # factual / balanced / creative presets
 ```
 
 ## Running
